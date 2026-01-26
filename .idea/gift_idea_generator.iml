@@ -28,7 +28,7 @@
     <option name="TEMPLATE_CONFIGURATION" value="Django" />
     <option name="TEMPLATE_FOLDERS">
       <list>
-        <option value="$MODULE_DIR$/../gift_idea_generator\templates" />
+        <option value="$MODULE_DIR$/gift_idea_generator/templates" />
       </list>
     </option>
   </component>
