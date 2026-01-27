@@ -122,3 +122,20 @@ class Gift(models.Model):
 
     def get_interest_tags(self):
         return self.tags.filter(tag_type='interest')
+
+class GiftImage(models.Model):
+    gift = models.ForeignKey(Gift, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='gifts/gallery/')
+    alt_text = models.CharField(max_length=200, blank=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Gift Image"
+        verbose_name_plural = "Gift Images"
+        ordering = ['order']
+        indexes = [
+            models.Index(fields=['gift', 'order']),
+        ]
+
+    def __str__(self):
+        return f"{self.gift.name} - Image {self.order}"
