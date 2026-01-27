@@ -47,14 +47,12 @@ INSTALLED_APPS = [
     'django.contrib.humanize',
 
     # Third-party apps
-    #'rest_framework',           # API endpoints
-    #'django_filters',           # Advanced filtering
-    #'crispy_forms',             # Better forms
-    #'crispy_bootstrap5',        # Bootstrap 5 templates
-    #'django_celery_beat',       # Periodic tasks
-    #'django_celery_results',    # Store task results in DB
-    #'corsheaders',              # CORS for API
-    #'debug_toolbar',            # Dev debugging (only if DEBUG=True)
+    'rest_framework',           # API endpoints
+    'django_filters',           # Advanced filtering
+    'corsheaders',              # CORS for API
+
+    'gift_idea_generator',
+    'gifts'
 ]
 
 MIDDLEWARE = [
