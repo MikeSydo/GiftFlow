@@ -77,7 +77,7 @@ def gift_search(request):
 
 def search_gifts_api(request):
     """
-    AJAX-endpoint for gifst filtering.
+    AJAX-endpoint for gifts filtering.
     """
 
     if request.method != "GET":
@@ -89,8 +89,8 @@ def search_gifts_api(request):
 
     #Filters
     category_id = request.GET.get("category")
-    if category_id:
-        qs = qs.filter(category_id=category_id)
+    if category_id and category_id.isdigit():
+        qs = qs.filter(category_id=int(category_id))
 
     gender = request.GET.get("gender")
     if gender in ("M", "F"):
@@ -103,10 +103,20 @@ def search_gifts_api(request):
 
     budget_min = request.GET.get("budget_min")
     budget_max = request.GET.get("budget_max")
-    if budget_min and budget_min.replace(".", "").isdigit():
-        qs = qs.filter(min_price__gte=float(budget_min))
-    if budget_max and budget_max.replace(".", "").isdigit():
-        qs = qs.filter(min_price__lte=float(budget_max))
+    if budget_min:
+        try:
+            budget_min_val = float(budget_min)
+            # Gift's min price should be >= user's min budget
+            qs = qs.filter(min_price__gte=budget_min_val)
+        except (ValueError, TypeError):
+            pass  # Ignore invalid input
+    if budget_max:
+        try:
+            budget_max_val = float(budget_max)
+            # Gift's min price should be <= user's max budget
+            qs = qs.filter(min_price__lte=budget_max_val)
+        except (ValueError, TypeError):
+            pass  # Ignore invalid input
 
     tag_ids = request.GET.get("tags")
     if tag_ids:

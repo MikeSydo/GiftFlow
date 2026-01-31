@@ -107,7 +107,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_without_filters(self):
         """Test API returns all active gifts without filters"""
-        response = self.client.get('/search_gifts_api/')
+        response = self.client.get('/api/search/')
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -123,7 +123,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_category(self):
         """Test filtering by category"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'category': self.category1.id
         })
 
@@ -136,7 +136,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_gender_male(self):
         """Test filtering by male gender includes male and unisex gifts"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'gender': 'M'
         })
 
@@ -152,7 +152,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_gender_female(self):
         """Test filtering by female gender includes female and unisex gifts"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'gender': 'F'
         })
 
@@ -168,7 +168,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_age(self):
         """Test filtering by age range"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'age': '25'
         })
 
@@ -180,7 +180,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_age_young(self):
         """Test filtering by young age"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'age': '16'
         })
 
@@ -193,7 +193,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_budget_min(self):
         """Test filtering by minimum budget"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'budget_min': '150'
         })
 
@@ -206,7 +206,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_budget_max(self):
         """Test filtering by maximum budget"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'budget_max': '200'
         })
 
@@ -221,7 +221,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_budget_range(self):
         """Test filtering by budget range"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'budget_min': '50',
             'budget_max': '150'
         })
@@ -234,7 +234,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_tags(self):
         """Test filtering by tags"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'tags': f'{self.tag_birthday.id}'
         })
 
@@ -249,7 +249,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_filter_by_multiple_tags(self):
         """Test filtering by multiple tags"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'tags': f'{self.tag_birthday.id},{self.tag_tech.id}'
         })
 
@@ -261,11 +261,11 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_combined_filters(self):
         """Test combining multiple filters"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'category': self.category1.id,
             'gender': 'M',
             'age': '30',
-            'budget_min': '100',
+            'budget_min': '400',
             'budget_max': '600',
             'tags': f'{self.tag_tech.id}'
         })
@@ -279,7 +279,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_response_structure(self):
         """Test response has correct structure"""
-        response = self.client.get('/search_gifts_api/')
+        response = self.client.get('/api/search/')
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -301,7 +301,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_method_not_allowed(self):
         """Test POST method returns error"""
-        response = self.client.post('/search_gifts_api/', {})
+        response = self.client.post('/api/search/', {})
 
         self.assertEqual(response.status_code, 405)
         data = response.json()
@@ -309,7 +309,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_invalid_parameters(self):
         """Test API handles invalid parameters gracefully"""
-        response = self.client.get('/search_gifts_api/', {
+        response = self.client.get('/api/search/', {
             'category': 'invalid',
             'age': 'not_a_number',
             'budget_min': 'abc',
@@ -338,7 +338,7 @@ class SearchGiftsAPITestCase(TestCase):
                 is_active=True
             )
 
-        response = self.client.get('/search_gifts_api/')
+        response = self.client.get('/api/search/')
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -348,7 +348,7 @@ class SearchGiftsAPITestCase(TestCase):
 
     def test_search_api_excludes_inactive_gifts(self):
         """Test API does not return inactive gifts"""
-        response = self.client.get('/search_gifts_api/')
+        response = self.client.get('/api/search/')
 
         data = response.json()
         titles = [gift['title'] for gift in data['results']]

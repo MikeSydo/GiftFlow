@@ -57,6 +57,7 @@ class Tag(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
 
 class Gift(models.Model):
     GENDER_TYPES = [
