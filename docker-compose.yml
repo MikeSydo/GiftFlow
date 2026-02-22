@@ -17,6 +17,17 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: gig_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
     build: .
     container_name: gig_web
@@ -28,16 +39,55 @@ services:
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
+      - media_volume:/app/media
     ports:
       - "8000:8000"
     environment:
       - DEBUG=${DEBUG}
       - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - CELERY_BROKER_URL=redis://redis:6379/0
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_worker:
+    build: .
+    container_name: gig_celery_worker
+    command: celery -A gift_idea_generator worker -l info -Q discovery,prices,verification
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=${DEBUG}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build: .
+    container_name: gig_celery_beat
+    command: celery -A gift_idea_generator beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/app
+    environment:
+      - DEBUG=${DEBUG}
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:
   postgres_data:
   static_volume:
+  media_volume:
