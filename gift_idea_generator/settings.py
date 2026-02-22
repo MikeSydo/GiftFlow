@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timedelta
+from celery.schedules import crontab
 import dj_database_url
 
 # Load environment variables from .env file
@@ -50,9 +51,11 @@ INSTALLED_APPS = [
     'rest_framework',           # API endpoints
     'django_filters',           # Advanced filtering
     'corsheaders',              # CORS for API
+    'django_celery_beat',       # Celery periodic tasks
 
     'gift_idea_generator',
-    'gifts'
+    'gifts',
+    'shops',
 ]
 
 MIDDLEWARE = [
@@ -136,3 +139,78 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Celery
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
+CELERY_BEAT_SCHEDULE = {
+    'discover-all-shops': {
+        'task': 'shops.tasks.trigger_all_shop_discovery',
+        'schedule': crontab(hour='*/6'),
+    },
+    'update-all-prices': {
+        'task': 'shops.tasks.trigger_all_price_updates',
+        'schedule': crontab(hour='*/2'),
+    },
+    'verify-all-links': {
+        'task': 'shops.tasks.trigger_all_verifications',
+        'schedule': crontab(hour=3, minute=0),
+    },
+}
+
+# Logging
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{asctime} {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'scraper_file': {
+            'class': 'logging.FileHandler',
+            'filename': LOG_DIR / 'scraper.log',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'shops.scrapers': {
+            'handlers': ['console', 'scraper_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'shops.tasks': {
+            'handlers': ['console', 'scraper_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# DRF
+REST_FRAMEWORK = {
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.OrderingFilter',
+    ],
+}
