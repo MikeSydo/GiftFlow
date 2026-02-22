@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     'rest_framework',           # API endpoints
     'django_filters',           # Advanced filtering
     'corsheaders',              # CORS for API
-    'django_celery_beat',       # Celery periodic tasks
 
     'gift_idea_generator',
     'gifts',

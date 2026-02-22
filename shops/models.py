@@ -33,7 +33,7 @@ class Shop(models.Model):
         ordering = ['-priority']
         constraints = [
             models.CheckConstraint(
-                check=Q(conversion_rate__gte=0) & Q(conversion_rate__lte=100),
+                condition=Q(conversion_rate__gte=0) & Q(conversion_rate__lte=100),
                 name='shop_conversion_rate_range',
             ),
         ]
@@ -75,10 +75,10 @@ class ProductLink(models.Model):
                 fields=['gift', 'shop'], name='unique_gift_shop',
             ),
             models.CheckConstraint(
-                check=Q(price__gt=0), name='productlink_price_positive',
+                condition=Q(price__gt=0), name='productlink_price_positive',
             ),
             models.CheckConstraint(
-                check=Q(original_price__isnull=True) | Q(original_price__gte=F('price')),
+                condition=Q(original_price__isnull=True) | Q(original_price__gte=F('price')),
                 name='productlink_original_gte_price',
             ),
         ]

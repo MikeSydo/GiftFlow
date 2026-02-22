@@ -12,7 +12,6 @@ gunicorn==24.1.1
 dj-database-url==3.1.0
 pillow==12.1.0
 celery[redis]==5.4.0
-django-celery-beat==2.7.0
 httpx==0.28.1
 beautifulsoup4==4.13.3
 playwright==1.49.1
