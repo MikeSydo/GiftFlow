@@ -37,7 +37,6 @@ services:
              gunicorn gift_idea_generator.wsgi:application --bind 0.0.0.0:8000 --workers 2"
     volumes:
       - .:/app
-      - static_volume:/app/staticfiles
       - media_volume:/app/media
     ports:
       - "8000:8000"
@@ -88,5 +87,4 @@ services:
 
 volumes:
   postgres_data:
-  static_volume:
   media_volume:
