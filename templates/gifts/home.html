@@ -1,0 +1,245 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GiftFlow — Знайдіть ідеальний подарунок</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'css/home.css' %}" />
+</head>
+
+<body>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-inner">
+
+      <a href="{% url 'gifts:home' %}" class="logo">
+        <span class="logo-icon">&#9829;</span>
+        <span class="logo-text">Gift<em>Flow</em></span>
+      </a>
+
+      <nav class="nav-catalog">
+        <button class="btn-catalog" id="catalogToggle">
+          <span class="btn-catalog__icon">&#9741;</span>
+          Каталог
+          <span class="btn-catalog__arrow">&#9660;</span>
+        </button>
+
+        <!-- Dropdown: one tab per top-level category -->
+        <div class="catalog-dropdown" id="catalogDropdown">
+          <div class="catalog-tabs" id="catalogTabs">
+            {% for item in catalog_data %}
+            <button class="catalog-tab {% if forloop.first %}catalog-tab--active{% endif %}"
+              data-tab="{{ forloop.counter0 }}">
+              {{ item.category.name }}
+            </button>
+            {% empty %}
+            <span class="catalog-empty">Категорії ще не додані</span>
+            {% endfor %}
+          </div>
+
+          <div class="catalog-panels" id="catalogPanels">
+            {% for item in catalog_data %}
+            <div class="catalog-panel {% if forloop.first %}catalog-panel--active{% endif %}"
+              data-panel="{{ forloop.counter0 }}">
+              {% for gift in item.gifts %}
+              <a href="#" class="catalog-card">
+                {% if gift.image %}
+                <img src="{{ gift.image.url }}" alt="{{ gift.name }}" class="catalog-card__img" />
+                {% else %}
+                <div class="catalog-card__img catalog-card__img--placeholder"></div>
+                {% endif %}
+                <div class="catalog-card__body">
+                  <h4 class="catalog-card__title">{{ gift.name }}</h4>
+                  {% if gift.min_price %}
+                  <span class="catalog-card__price">від {{ gift.min_price }} ₴</span>
+                  {% endif %}
+                </div>
+              </a>
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </nav>
+
+      <div class="nav-actions">
+        <button class="btn-nav btn-nav--outline" id="btnLogin">Вхід</button>
+        <button class="btn-nav btn-nav--primary" id="btnSignup">Реєстрація</button>
+      </div>
+
+      <button class="hamburger" id="hamburger" aria-label="Меню">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero__bg"></div>
+    <div class="hero__content">
+      <h1 class="hero__title">Знайдіть<br /><em>ідеальний</em><br />подарунок</h1>
+
+      <a href="{% url 'gifts:gift_search' %}" class="btn-hero">
+        <span class="btn-hero__ring"></span>
+        <span class="btn-hero__text">Починати пошук</span>
+        <span class="btn-hero__icon">&#8594;</span>
+      </a>
+    </div>
+
+    <!-- decorative floating orbs -->
+    <div class="hero__orb hero__orb--1"></div>
+    <div class="hero__orb hero__orb--2"></div>
+    <div class="hero__orb hero__orb--3"></div>
+  </section>
+
+  <!-- Featured -->
+  {% if featured_gifts %}
+  <section class="section featured">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Рекомендовані</h2>
+        <span class="section-line"></span>
+      </div>
+
+      <div class="featured-grid">
+        {% for gift in featured_gifts %}
+        <article class="featured-card" style="--delay: {{ forloop.counter0 }}">
+          <div class="featured-card__media">
+            {% if gift.image %}
+            <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
+            {% else %}
+            <div class="featured-card__placeholder"></div>
+            {% endif %}
+            <span class="featured-card__badge">&#9733; Топ</span>
+          </div>
+          <div class="featured-card__body">
+            {% if gift.category %}
+            <span class="featured-card__cat">{{ gift.category.name }}</span>
+            {% endif %}
+            <h3 class="featured-card__title">{{ gift.name }}</h3>
+            <p class="featured-card__desc">{{ gift.short_description|default:"" }}</p>
+            <div class="featured-card__footer">
+              {% if gift.min_price %}
+              <span class="featured-card__price">від {{ gift.min_price }} ₴</span>
+              {% endif %}
+              <a href="#" class="featured-card__link">Переглянути →</a>
+            </div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Catalog sections -->
+  {% for item in catalog_data %}
+  <section class="section catalog-section">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">{{ item.category.name }}</h2>
+        {% if item.category.description %}
+        <p class="section-desc">{{ item.category.description }}</p>
+        {% endif %}
+        <span class="section-line"></span>
+      </div>
+
+      <div class="catalog-grid">
+        {% for gift in item.gifts %}
+        <article class="gift-card" style="--delay: {{ forloop.counter0 }}">
+          <div class="gift-card__media">
+            {% if gift.image %}
+            <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
+            {% else %}
+            <div class="gift-card__placeholder"></div>
+            {% endif %}
+          </div>
+          <div class="gift-card__body">
+            <h3 class="gift-card__title">{{ gift.name }}</h3>
+            <p class="gift-card__desc">{{ gift.short_description|default:"" }}</p>
+            <div class="gift-card__footer">
+              {% if gift.min_price %}
+              <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
+              {% endif %}
+              <a href="#" class="gift-card__link">→</a>
+            </div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+
+      <div class="section-cta">
+        <a href="{% url 'gifts:gift_search' %}?category={{ item.category.id }}" class="btn-more">
+          Всі подарунки в категорії {{ item.category.name }}
+        </a>
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer__grid">
+
+        <div class="footer__brand">
+          <a href="{% url 'gifts:home' %}" class="logo logo--footer">
+            <span class="logo-icon">&#9829;</span>
+            <span class="logo-text">Gift<em>Flow</em></span>
+          </a>
+          <p class="footer__tagline">Персональний сервіс підбору подарунків. Знайдіть те, що торкнеться душі.</p>
+        </div>
+
+        <div class="footer__col">
+          <h4 class="footer__heading">Каталог</h4>
+          <ul class="footer__links">
+            {% for item in catalog_data %}
+            <li><a href="#">{{ item.category.name }}</a></li>
+            {% empty %}
+            <li><a href="#">Всі подарунки</a></li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="footer__col">
+          <h4 class="footer__heading">Інше</h4>
+          <ul class="footer__links">
+            <li><a href="#">Про нас</a></li>
+            <li><a href="#">Контакти</a></li>
+            <li><a href="#">Партнери</a></li>
+            <li><a href="#">FAQ</a></li>
+          </ul>
+        </div>
+
+        <div class="footer__col">
+          <h4 class="footer__heading">Акаунт</h4>
+          <ul class="footer__links">
+            <li><a href="#" id="footerLogin">Вхід</a></li>
+            <li><a href="#" id="footerSignup">Реєстрація</a></li>
+            <li><a href="#">Мої списки</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer__bottom">
+        <p class="footer__copy">&copy; 2025 GiftFlow. Всі права reservation.</p>
+        <div class="footer__legal">
+          <a href="#">Конфіденційність</a>
+          <a href="#">Умови</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="{% static 'js/home.js' %}"></script>
+</body>
+
+</html>

@@ -1,0 +1,240 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GiftFlow — Пошук подарунку</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'css/home.css' %}" />
+  <link rel="stylesheet" href="{% static 'css/search.css' %}" />
+</head>
+
+<body class="page--search">
+
+  <!-- Header -->
+  <header class="site-header site-header--compact">
+    <div class="header-inner">
+      <a href="{% url 'gifts:home' %}" class="logo">
+        <span class="logo-icon">&#9829;</span>
+        <span class="logo-text">Gift<em>Flow</em></span>
+      </a>
+      <div class="nav-actions">
+        <button class="btn-nav btn-nav--outline">Войти</button>
+        <button class="btn-nav btn-nav--primary">Зареєстрироваться</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Wizard wrapper -->
+  <main class="wizard-page">
+    <div class="wizard-container">
+
+      <!-- Progress bar -->
+      <div class="wizard-progress">
+        <div class="wizard-progress__track">
+          <div class="wizard-progress__fill" id="progressFill" style="width: 25%"></div>
+        </div>
+        <div class="wizard-progress__steps">
+          <span class="wizard-step wizard-step--active" data-step="1">
+            <span class="wizard-step__num">1</span>
+            <span class="wizard-step__label">Категорія</span>
+          </span>
+          <span class="wizard-step" data-step="2">
+            <span class="wizard-step__num">2</span>
+            <span class="wizard-step__label">Свято</span>
+          </span>
+          <span class="wizard-step" data-step="3">
+            <span class="wizard-step__num">3</span>
+            <span class="wizard-step__label">Параметри</span>
+          </span>
+          <span class="wizard-step" data-step="4">
+            <span class="wizard-step__num">4</span>
+            <span class="wizard-step__label">Результати</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Step 1: Category -->
+      <div class="wizard-panel wizard-panel--active" id="step1">
+        <div class="wizard-panel__header">
+          <h2 class="wizard-panel__title">Яка категорія подарунку?</h2>
+          <p class="wizard-panel__sub">Оберіть область, яка найкраще описує ваш подарунок</p>
+        </div>
+
+        <div class="wizard-grid wizard-grid--categories" id="categoriesGrid">
+          {% for cat in categories %}
+          <button class="wizard-card" data-field="category" data-value="{{ cat.id }}">
+            <span class="wizard-card__icon">
+              {% if cat.icon %}
+              <i class="{{ cat.icon }}"></i>
+              {% else %}
+              &#9741;
+              {% endif %}
+            </span>
+            <span class="wizard-card__label">{{ cat.name }}</span>
+            {% if cat.description %}
+            <span class="wizard-card__hint">{{ cat.description|truncatechars:45 }}</span>
+            {% endif %}
+          </button>
+          {% empty %}
+          <p class="wizard-empty">Категорії ще не додані в базу.</p>
+          {% endfor %}
+        </div>
+
+        <div class="wizard-nav">
+          <button class="btn-wizard btn-wizard--next" id="next1">Далі <span>→</span></button>
+        </div>
+      </div>
+
+      <!-- Step 2: Occasion -->
+      <div class="wizard-panel" id="step2">
+        <div class="wizard-panel__header">
+          <h2 class="wizard-panel__title">Яке свято або подія?</h2>
+          <p class="wizard-panel__sub">Можна вибрати декілька варіантів</p>
+        </div>
+
+        <div class="wizard-grid wizard-grid--occasions" id="occasionsGrid">
+          {% for tag in occasion_tags %}
+          <button class="wizard-card wizard-card--multi" data-field="occasion" data-value="{{ tag.id }}">
+            <span class="wizard-card__icon">&#9733;</span>
+            <span class="wizard-card__label">{{ tag.name }}</span>
+          </button>
+          {% empty %}
+          <p class="wizard-empty">Типи подій не додані.</p>
+          {% endfor %}
+        </div>
+
+        <div class="wizard-nav">
+          <button class="btn-wizard btn-wizard--back" id="back2"><span>←</span> Назад</button>
+          <button class="btn-wizard btn-wizard--next" id="next2">Далі <span>→</span></button>
+        </div>
+      </div>
+
+      <!-- Step 3: Person params -->
+      <div class="wizard-panel" id="step3">
+        <div class="wizard-panel__header">
+          <h2 class="wizard-panel__title">Про людину</h2>
+          <p class="wizard-panel__sub">Чим більше ви вкажете — тим точніші результати</p>
+        </div>
+
+        <!-- Gender -->
+        <div class="wizard-field">
+          <label class="wizard-field__label">Стать</label>
+          <div class="wizard-field__options wizard-field__options--gender">
+            <button class="wizard-pill" data-field="gender" data-value="M">Чоловік</button>
+            <button class="wizard-pill" data-field="gender" data-value="F">Жінка</button>
+            <button class="wizard-pill wizard-pill--active" data-field="gender" data-value="">Будь-яка</button>
+          </div>
+        </div>
+
+        <!-- Age -->
+        <div class="wizard-field">
+          <label class="wizard-field__label">Вік: <span id="ageValue">25</span> років</label>
+          <div class="wizard-field__slider">
+            <input type="range" id="ageSlider" min="5" max="90" value="25" class="wizard-slider" />
+            <div class="wizard-slider__ticks">
+              <span>5</span><span>20</span><span>40</span><span>60</span><span>90</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Budget -->
+        <div class="wizard-field">
+          <label class="wizard-field__label">Бюджет</label>
+          <div class="wizard-field__budget">
+            <div class="wizard-budget-input">
+              <span class="wizard-budget-input__symbol">₴</span>
+              <input type="number" id="budgetMin" placeholder="від" min="0" class="wizard-input" />
+            </div>
+            <span class="wizard-budget-dash">—</span>
+            <div class="wizard-budget-input">
+              <span class="wizard-budget-input__symbol">₴</span>
+              <input type="number" id="budgetMax" placeholder="до" min="0" class="wizard-input" />
+            </div>
+          </div>
+          <div class="wizard-field__presets">
+            <button class="wizard-preset" data-min="0" data-max="200">До 200</button>
+            <button class="wizard-preset" data-min="200" data-max="500">200–500</button>
+            <button class="wizard-preset" data-min="500" data-max="1000">500–1000</button>
+            <button class="wizard-preset" data-min="1000" data-max="5000">1000+</button>
+          </div>
+        </div>
+
+        <!-- Interests (multi) -->
+        <div class="wizard-field">
+          <label class="wizard-field__label">Інтереси (необов'язково)</label>
+          <div class="wizard-grid wizard-grid--interests" id="interestsGrid">
+            {% for tag in interest_tags %}
+            <button class="wizard-pill wizard-pill--sm" data-field="interest" data-value="{{ tag.id }}">
+              {{ tag.name }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Relationship (multi) -->
+        <div class="wizard-field">
+          <label class="wizard-field__label">Хто це? (необов'язково)</label>
+          <div class="wizard-grid wizard-grid--interests" id="relationGrid">
+            {% for tag in relationship_tags %}
+            <button class="wizard-pill wizard-pill--sm" data-field="relationship" data-value="{{ tag.id }}">
+              {{ tag.name }}
+            </button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="wizard-nav">
+          <button class="btn-wizard btn-wizard--back" id="back3"><span>←</span> Назад</button>
+          <button class="btn-wizard btn-wizard--search" id="searchBtn">
+            <span class="btn-wizard__text">Знайти подарунки</span>
+            <span class="btn-wizard__icon">&#128269;</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 4: Results -->
+      <div class="wizard-panel" id="step4">
+        <div class="wizard-panel__header">
+          <h2 class="wizard-panel__title">Результати</h2>
+          <p class="wizard-panel__sub" id="resultsCount">Знайдено подарунків...</p>
+        </div>
+
+        <div class="results-container" id="resultsContainer">
+          <!-- Dynamically populated via JS -->
+          <div class="results-loading" id="resultsLoading">
+            <div class="results-loading__spinner"></div>
+            <p>Шукаємо подарунки...</p>
+          </div>
+        </div>
+
+        <div class="wizard-nav">
+          <button class="btn-wizard btn-wizard--back" id="back4"><span>←</span> Змінити параметри</button>
+        </div>
+      </div>
+
+    </div><!-- /wizard-container -->
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer site-footer--compact">
+    <div class="container">
+      <p class="footer__copy">&copy; 2025 GiftFlow</p>
+    </div>
+  </footer>
+
+  <!-- URL for JS -->
+  <script>
+    window.SEARCH_API_URL = "{% url 'gifts:search_gifts_api' %}";
+  </script>
+  <script src="{% static 'js/home.js' %}"></script>
+  <script src="{% static 'js/search.js' %}"></script>
+</body>
+
+</html>
