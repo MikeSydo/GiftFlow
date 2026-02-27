@@ -48,6 +48,7 @@ def process_discovered_product(product_data: dict, shop_id: int):
     from rapidfuzz import fuzz
     from gifts.models import Gift
     from .models import Shop, ProductLink, PriceHistory
+    from .services import CategoryMatcher
 
     shop = Shop.objects.get(id=shop_id)
     name = product_data['name']
@@ -85,6 +86,20 @@ def process_discovered_product(product_data: dict, shop_id: int):
         )
         logger.info('[%s] created new inactive Gift id=%d name=%s', shop.slug, best_gift.id, name)
 
+    # Run category matcher against the hint provided by the scraper
+    raw_category = (product_data.get('category_hint') or '').strip()
+    matcher = CategoryMatcher()
+    match_result = matcher.match(raw_category)
+
+    # Auto-assign category to Gift when confidence is high and Gift has none yet
+    if match_result.category and not match_result.needs_review and not best_gift.category_id:
+        best_gift.category = match_result.category
+        best_gift.save(update_fields=['category'])
+        logger.info(
+            '[%s] auto-assigned category "%s" (score=%.1f) to Gift id=%d',
+            shop.slug, match_result.category.name, match_result.confidence, best_gift.id,
+        )
+
     # create / update ProductLink
     now = timezone.now()
     link, created = ProductLink.objects.update_or_create(
@@ -98,6 +113,10 @@ def process_discovered_product(product_data: dict, shop_id: int):
             'in_stock': product_data.get('in_stock', True),
             'sku': (product_data.get('sku') or '')[:100] or None,
             'last_price_update': now,
+            # Category matching results
+            'original_category_name': raw_category[:300],
+            'category_confidence': match_result.confidence,
+            'needs_category_review': match_result.needs_review,
         },
     )
 

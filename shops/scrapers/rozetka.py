@@ -47,6 +47,17 @@ class RozetkaSpider(BaseShopScraper):
             logger.error('[rozetka] beautifulsoup4 not installed')
             return []
 
+        # Derive category hint from the listing URL path.
+        # e.g. /ua/computers-notebooks/c80253/ -> 'computers notebooks'
+        from urllib.parse import urlparse
+        raw_parts = urlparse(url).path.split('/')
+        category_parts = [
+            p for p in raw_parts
+            if p and p not in ('ua')        # strip locale prefix
+            and not (p.startswith('c') and p[1:].isdigit()) # strip category IDs like c80253
+        ]
+        category_hint = ' '.join(category_parts).replace('-', ' ')
+
         soup = BeautifulSoup(html, 'html.parser')
         products: list[ProductData] = []
 
@@ -89,6 +100,7 @@ class RozetkaSpider(BaseShopScraper):
                         original_price=original_price,
                         in_stock=in_stock,
                         image_url=image_url,
+                        category_hint=category_hint,
                     ))
             except Exception as exc:
                 logger.warning('[rozetka] failed to parse tile: %s', exc)
@@ -124,6 +136,10 @@ class RozetkaSpider(BaseShopScraper):
         desc_el = soup.select_one('.product-about__description-content')
         description = desc_el.get_text(strip=True) if desc_el else None
 
+        # Extract breadcrumbs as category hint: 'Home > Electronics > Laptops'
+        breadcrumb_els = soup.select('.breadcrumbs__item span')
+        category_hint = ' > '.join(el.get_text(strip=True) for el in breadcrumb_els if el.get_text(strip=True))
+
         return ProductData(
             name=name,
             url=url,
@@ -133,6 +149,7 @@ class RozetkaSpider(BaseShopScraper):
             image_url=image_url,
             sku=sku,
             description=description,
+            category_hint=category_hint,
         )
 
     def fetch(self, url: str) -> str:
