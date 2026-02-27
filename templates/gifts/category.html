@@ -1,0 +1,348 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ category.name }} — GiftFlow</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="{% static 'css/home.css' %}" />
+    <style>
+        /* Category page extras */
+        .category-hero {
+            padding: 5rem 0 3rem;
+            text-align: center;
+        }
+
+        .category-hero__label {
+            display: inline-block;
+            font-size: .75rem;
+            font-weight: 600;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            color: var(--accent, #c0739a);
+            margin-bottom: .75rem;
+        }
+
+        .category-hero__title {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 700;
+            color: var(--text-primary, #f5efe9);
+            margin: 0 0 .5rem;
+        }
+
+        .category-hero__count {
+            font-size: .9rem;
+            color: var(--text-muted, #a89080);
+            margin-top: .5rem;
+        }
+
+        .gift-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1.5rem;
+            padding: 2rem 0 4rem;
+        }
+
+        .gift-grid__empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 4rem 1rem;
+            color: var(--text-muted, #a89080);
+            font-size: 1.1rem;
+        }
+
+        .gift-grid__empty span {
+            display: block;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            opacity: .4;
+        }
+
+        .gift-card {
+            background: rgba(255, 255, 255, .04);
+            border: 1px solid rgba(255, 255, 255, .08);
+            border-radius: 1rem;
+            overflow: hidden;
+            transition: transform .2s, box-shadow .2s;
+            animation: fadeUp .4s ease both;
+            animation-delay: calc(var(--delay, 0) * 60ms);
+        }
+
+        .gift-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+        }
+
+        .gift-card__media {
+            aspect-ratio: 4/3;
+            overflow: hidden;
+            background: rgba(255, 255, 255, .06);
+        }
+
+        .gift-card__media img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform .35s;
+        }
+
+        .gift-card:hover .gift-card__media img {
+            transform: scale(1.06);
+        }
+
+        .gift-card__placeholder {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(255, 255, 255, .06) 0%, rgba(255, 255, 255, .02) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            opacity: .25;
+        }
+
+        .gift-card__placeholder::before {
+            content: '🎁';
+        }
+
+        .gift-card__body {
+            padding: 1rem 1.25rem 1.25rem;
+        }
+
+        .gift-card__title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary, #f5efe9);
+            margin: 0 0 .35rem;
+            line-height: 1.35;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .gift-card__desc {
+            font-size: .82rem;
+            color: var(--text-muted, #a89080);
+            margin: 0 0 .75rem;
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .gift-card__footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .gift-card__price {
+            font-size: .9rem;
+            font-weight: 600;
+            color: var(--accent, #c0739a);
+        }
+
+        .gift-card__link {
+            font-size: .85rem;
+            color: var(--text-muted, #a89080);
+            text-decoration: none;
+            transition: color .2s;
+        }
+
+        .gift-card__link:hover {
+            color: var(--accent, #c0739a);
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .breadcrumb {
+            padding: 1.5rem 0 0;
+            font-size: .85rem;
+            color: var(--text-muted, #a89080);
+        }
+
+        .breadcrumb a {
+            color: var(--text-muted, #a89080);
+            text-decoration: none;
+            transition: color .2s;
+        }
+
+        .breadcrumb a:hover {
+            color: var(--accent, #c0739a);
+        }
+
+        .breadcrumb__sep {
+            margin: 0 .4rem;
+            opacity: .5;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Header (same as home.html) -->
+    <header class="site-header">
+        <div class="header-inner">
+
+            <a href="{% url 'gifts:home' %}" class="logo">
+                <span class="logo-icon">&#9829;</span>
+                <span class="logo-text">Gift<em>Flow</em></span>
+            </a>
+
+            <nav class="nav-catalog">
+                <button class="btn-catalog" id="catalogToggle">
+                    <span class="btn-catalog__icon">&#9741;</span>
+                    Каталог
+                    <span class="btn-catalog__arrow">&#9660;</span>
+                </button>
+
+                <div class="catalog-dropdown" id="catalogDropdown">
+                    <div class="catalog-tabs" id="catalogTabs">
+                        {% for cat in all_categories %}
+                        <a class="catalog-tab {% if cat.slug == category.slug %}catalog-tab--active{% endif %}"
+                            href="{% url 'gifts:category_detail' cat.slug %}">
+                            {{ cat.name }}
+                        </a>
+                        {% empty %}
+                        <span class="catalog-empty">Категорії ще не додані</span>
+                        {% endfor %}
+                    </div>
+                </div>
+            </nav>
+
+            <div class="nav-actions">
+                <button class="btn-nav btn-nav--outline" id="btnLogin">Вхід</button>
+                <button class="btn-nav btn-nav--primary" id="btnSignup">Реєстрація</button>
+            </div>
+
+            <button class="hamburger" id="hamburger" aria-label="Меню">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Category hero -->
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="{% url 'gifts:home' %}">Головна</a>
+            <span class="breadcrumb__sep">›</span>
+            <span>{{ category.name }}</span>
+        </div>
+    </div>
+
+    <section class="category-hero">
+        <span class="category-hero__label">Категорія</span>
+        <h1 class="category-hero__title">{{ category.name }}</h1>
+        {% if category.description %}
+        <p style="color:var(--text-muted,#a89080);max-width:560px;margin:.5rem auto 0;font-size:.95rem;">
+            {{ category.description }}
+        </p>
+        {% endif %}
+        <p class="category-hero__count">{{ gifts.count }} подарунк{% if gifts.count == 1 %}ій{% else %}ів{% endif %}</p>
+    </section>
+
+    <!-- Gift grid -->
+    <main class="container">
+        <div class="gift-grid">
+            {% for gift in gifts %}
+            <article class="gift-card" style="--delay: {{ forloop.counter0 }}">
+                <div class="gift-card__media">
+                    {% if gift.image %}
+                    <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
+                    {% else %}
+                    <div class="gift-card__placeholder"></div>
+                    {% endif %}
+                </div>
+                <div class="gift-card__body">
+                    <h3 class="gift-card__title">{{ gift.name }}</h3>
+                    {% if gift.short_description %}
+                    <p class="gift-card__desc">{{ gift.short_description }}</p>
+                    {% endif %}
+                    <div class="gift-card__footer">
+                        {% if gift.min_price %}
+                        <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
+                        {% endif %}
+                        <a href="#" class="gift-card__link">Переглянути →</a>
+                    </div>
+                </div>
+            </article>
+            {% empty %}
+            <div class="gift-grid__empty">
+                <span>🎁</span>
+                Подарунки для категорії "{{ category.name }}" ще не додані.<br>
+                <small style="font-size:.85rem;opacity:.7;margin-top:.5rem;display:block;">
+                    Запустіть Discovery в Адмінці або зачекайте наступного запуску Celery Beat.
+                </small>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <div class="container">
+            <div class="footer__grid">
+                <div class="footer__brand">
+                    <a href="{% url 'gifts:home' %}" class="logo logo--footer">
+                        <span class="logo-icon">&#9829;</span>
+                        <span class="logo-text">Gift<em>Flow</em></span>
+                    </a>
+                    <p class="footer__tagline">Персональний сервіс підбору подарунків.</p>
+                </div>
+                <div class="footer__col">
+                    <h4 class="footer__heading">Каталог</h4>
+                    <ul class="footer__links">
+                        {% for cat in all_categories %}
+                        <li><a href="{% url 'gifts:category_detail' cat.slug %}">{{ cat.name }}</a></li>
+                        {% empty %}
+                        <li><a href="#">Всі подарунки</a></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="footer__col">
+                    <h4 class="footer__heading">Інше</h4>
+                    <ul class="footer__links">
+                        <li><a href="#">Про нас</a></li>
+                        <li><a href="#">Контакти</a></li>
+                        <li><a href="#">FAQ</a></li>
+                    </ul>
+                </div>
+                <div class="footer__col">
+                    <h4 class="footer__heading">Акаунт</h4>
+                    <ul class="footer__links">
+                        <li><a href="#" id="footerLogin">Вхід</a></li>
+                        <li><a href="#" id="footerSignup">Реєстрація</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer__bottom">
+                <p class="footer__copy">&copy; 2025 GiftFlow. Всі права reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="{% static 'js/home.js' %}"></script>
+</body>
+
+</html>

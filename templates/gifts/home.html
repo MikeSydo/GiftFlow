@@ -36,10 +36,10 @@
         <div class="catalog-dropdown" id="catalogDropdown">
           <div class="catalog-tabs" id="catalogTabs">
             {% for item in catalog_data %}
-            <button class="catalog-tab {% if forloop.first %}catalog-tab--active{% endif %}"
-              data-tab="{{ forloop.counter0 }}">
+            <a class="catalog-tab {% if forloop.first %}catalog-tab--active{% endif %}"
+              href="{% url 'gifts:category_detail' item.category.slug %}" data-tab="{{ forloop.counter0 }}">
               {{ item.category.name }}
-            </button>
+            </a>
             {% empty %}
             <span class="catalog-empty">Категорії ще не додані</span>
             {% endfor %}
@@ -177,7 +177,7 @@
       </div>
 
       <div class="section-cta">
-        <a href="{% url 'gifts:gift_search' %}?category={{ item.category.id }}" class="btn-more">
+        <a href="{% url 'gifts:category_detail' item.category.slug %}" class="btn-more">
           Всі подарунки в категорії {{ item.category.name }}
         </a>
       </div>
