@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q, F
 
@@ -66,6 +67,22 @@ class ProductLink(models.Model):
     last_checked = models.DateTimeField(blank=True, null=True)
     last_price_update = models.DateTimeField(blank=True, null=True)
     click_count = models.IntegerField(default=0)
+
+    # Category matching fields
+    original_category_name = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='Original category or breadcrumbs from the source shop',
+    )
+    category_confidence = models.FloatField(
+        blank=True, null=True,
+        validators=[MinValueValidator(0.0), MaxValueValidator(100.0)],
+        help_text='Algorithm confidence score for category match (0-100)',
+    )
+    needs_category_review = models.BooleanField(
+        default=False, db_index=True,
+        help_text='Flagged for manual category review',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -87,6 +104,7 @@ class ProductLink(models.Model):
             models.Index(fields=['in_stock', 'price']),
             models.Index(fields=['last_price_update']),
             models.Index(fields=['gift']),
+            models.Index(fields=['needs_category_review', 'shop']),
         ]
 
     def __str__(self):
