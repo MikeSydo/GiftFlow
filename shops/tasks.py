@@ -27,8 +27,14 @@ def discover_shop_products(shop_id: int, category_url: str):
 
     try:
         with scraper:
-            html = scraper.fetch(category_url)
-            products = scraper.parse_product_list(html, category_url)
+            # Some scrapers (e.g. Rozetka) need to extract data while
+            # the browser is still open (Shadow DOM / Angular).
+            if hasattr(scraper, 'fetch_and_parse'):
+                products = scraper.fetch_and_parse(category_url)
+            else:
+                html = scraper.fetch(category_url)
+                products = scraper.parse_product_list(html, category_url)
+
             logger.info(
                 '[%s] discovered %d products from %s',
                 shop.slug, len(products), category_url,

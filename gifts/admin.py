@@ -53,6 +53,17 @@ class GiftAdmin(admin.ModelAdmin):
     list_editable = ('is_active', 'is_featured')
     readonly_fields = ('created_at', 'updated_at')
     inlines = [GiftImageInline]
+    actions = ['make_active', 'make_inactive']
+
+    @admin.action(description='Make active')
+    def make_active(self, request, queryset):
+        count = queryset.update(is_active=True)
+        self.message_user(request, f'{count} gifts made active.')
+
+    @admin.action(description='Make inactive')
+    def make_inactive(self, request, queryset):
+        count = queryset.update(is_active=False)
+        self.message_user(request, f'{count} gifts made inactive.')
 
     fieldsets = (
         ('Main Information', {

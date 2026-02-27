@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
 
 RUN apt-get update && apt-get install -y \
     postgresql-client \
