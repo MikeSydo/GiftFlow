@@ -17,13 +17,13 @@ def home(request):
             cat.gift_set.filter(is_active=True)
             .order_by("-popularity_score", "-created_at")[:4]
         )
-        if top_gifts:
-            catalog_data.append(
-                {
-                    "category": cat,
-                    "gifts": top_gifts,
-                }
-            )
+        # Always include the category — even if it has no gifts yet
+        catalog_data.append(
+            {
+                "category": cat,
+                "gifts": top_gifts,
+            }
+        )
 
     featured_gifts = (
         Gift.objects.filter(is_active=True, is_featured=True)
