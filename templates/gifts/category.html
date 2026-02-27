@@ -119,7 +119,7 @@
         .gift-card__title {
             font-size: 1rem;
             font-weight: 600;
-            color: var(--text-primary, #f5efe9);
+            color: #4a3e35;
             margin: 0 0 .35rem;
             line-height: 1.35;
             display: -webkit-box;
@@ -131,7 +131,7 @@
 
         .gift-card__desc {
             font-size: .82rem;
-            color: var(--text-muted, #a89080);
+            color: #7b6859;
             margin: 0 0 .75rem;
             line-height: 1.5;
             display: -webkit-box;
@@ -145,6 +145,8 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
         .gift-card__price {
@@ -155,9 +157,10 @@
 
         .gift-card__link {
             font-size: .85rem;
-            color: var(--text-muted, #a89080);
+            color: #7b6859;
             text-decoration: none;
             transition: color .2s;
+            white-space: nowrap;
         }
 
         .gift-card__link:hover {
@@ -270,6 +273,8 @@
                 <div class="gift-card__media">
                     {% if gift.image %}
                     <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
+                    {% elif gift.image_url %}
+                    <img src="{{ gift.image_url }}" alt="{{ gift.name }}" />
                     {% else %}
                     <div class="gift-card__placeholder"></div>
                     {% endif %}

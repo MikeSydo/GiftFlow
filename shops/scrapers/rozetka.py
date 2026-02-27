@@ -193,14 +193,19 @@ class RozetkaSpider(BaseShopScraper):
 
             # Image URL
             image_url = None
-            img = item.get('image_main') or item.get('images')
-            if isinstance(img, str) and img:
-                image_url = img
-            elif isinstance(img, dict):
-                image_url = img.get('url') or img.get('original') or img.get('large')
-            elif isinstance(img, list) and img:
-                first = img[0]
+            images_data = item.get('images')
+            
+            if isinstance(images_data, dict):
+                # API usually returns {"main": "https://..."}
+                image_url = images_data.get('main') or images_data.get('original')
+            elif isinstance(images_data, list) and images_data:
+                first = images_data[0]
                 image_url = first if isinstance(first, str) else first.get('url', '')
+                
+            if not image_url:
+                image_main = item.get('image_main')
+                if isinstance(image_main, str) and image_main:
+                    image_url = image_main
 
             # Stock status
             sell_status = item.get('sell_status', 'available')

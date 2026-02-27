@@ -41,7 +41,7 @@ class ProductLinkAdmin(admin.ModelAdmin):
     list_filter = ['shop', 'in_stock', 'is_verified', 'needs_category_review']
     search_fields = ['product_name', 'sku', 'product_url', 'original_category_name']
     raw_id_fields = ['gift', 'shop']
-    readonly_fields = ['click_count', 'last_checked', 'last_price_update', 'category_confidence']
+    readonly_fields = ['click_count', 'last_checked', 'last_price_update', 'category_confidence', 'image_url']
     list_editable = ['needs_category_review']
     actions = ['trigger_price_update', 'verify_links', 'approve_categories']
 

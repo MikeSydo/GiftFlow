@@ -67,6 +67,7 @@ class ProductLink(models.Model):
     last_checked = models.DateTimeField(blank=True, null=True)
     last_price_update = models.DateTimeField(blank=True, null=True)
     click_count = models.IntegerField(default=0)
+    image_url = models.URLField(max_length=1000, blank=True, null=True, verbose_name='Image URL')
 
     # Category matching fields
     original_category_name = models.CharField(

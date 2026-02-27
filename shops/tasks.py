@@ -89,6 +89,7 @@ def process_discovered_product(product_data: dict, shop_id: int):
             is_active=False,
             min_price=price,
             max_price=price,
+            image_url=product_data.get('image_url')[:1000] if product_data.get('image_url') else None,
         )
         logger.info('[%s] created new inactive Gift id=%d name=%s', shop.slug, best_gift.id, name)
 
@@ -123,6 +124,7 @@ def process_discovered_product(product_data: dict, shop_id: int):
             'original_category_name': raw_category[:300],
             'category_confidence': match_result.confidence,
             'needs_category_review': match_result.needs_review,
+            'image_url': product_data.get('image_url')[:1000] if product_data.get('image_url') else None,
         },
     )
 

@@ -67,7 +67,7 @@ class GiftAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Main Information', {
-            'fields': ('name', 'slug', 'short_description', 'description', 'image')
+            'fields': ('name', 'slug', 'short_description', 'description', 'image', 'image_url')
         }),
         ('Categories', {
             'fields': ('category', 'tags')

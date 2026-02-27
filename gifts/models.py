@@ -71,6 +71,7 @@ class Gift(models.Model):
     description = models.TextField(null=True, blank=True)
     short_description = models.TextField(null=True, blank=True, verbose_name="Short description")
     image = models.ImageField(upload_to="gifts/", null=True, blank=True)
+    image_url = models.URLField(max_length=1000, null=True, blank=True, verbose_name="Image URL")
     gender = models.CharField(max_length=1, choices=GENDER_TYPES, default="U")
     age_min = models.PositiveIntegerField(default=0, validators=[MaxValueValidator(100)], verbose_name="Age min")
     age_max = models.PositiveIntegerField(default=100, validators=[MaxValueValidator(100)],verbose_name="Age max")
