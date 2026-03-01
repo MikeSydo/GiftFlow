@@ -208,7 +208,7 @@
     <header class="site-header">
         <div class="header-inner">
 
-            <a href="{% url 'gifts:home' %}" class="logo">
+            <a href="{% url 'home:home' %}" class="logo">
                 <span class="logo-icon">&#9829;</span>
                 <span class="logo-text">Gift<em>Flow</em></span>
             </a>
@@ -248,7 +248,7 @@
     <!-- Category hero -->
     <div class="container">
         <div class="breadcrumb">
-            <a href="{% url 'gifts:home' %}">Головна</a>
+            <a href="{% url 'home:home' %}">Головна</a>
             <span class="breadcrumb__sep">›</span>
             <span>{{ category.name }}</span>
         </div>
@@ -309,7 +309,7 @@
         <div class="container">
             <div class="footer__grid">
                 <div class="footer__brand">
-                    <a href="{% url 'gifts:home' %}" class="logo logo--footer">
+                    <a href="{% url 'home:home' %}" class="logo logo--footer">
                         <span class="logo-icon">&#9829;</span>
                         <span class="logo-text">Gift<em>Flow</em></span>
                     </a>
