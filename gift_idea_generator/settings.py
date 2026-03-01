@@ -55,6 +55,8 @@ INSTALLED_APPS = [
     'gift_idea_generator',
     'gifts',
     'shops',
+    'home',
+    'search',
 ]
 
 MIDDLEWARE = [
