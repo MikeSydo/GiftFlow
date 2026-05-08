@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, quote_plus, urlencode, urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -128,6 +128,32 @@ class BaseConnector:
             query[key] = [value]
         new_query = urlencode(query, doseq=True)
         return urlunparse(parsed._replace(query=new_query))
+
+    def build_query_url(self, source) -> str:
+        raw_value = (source.value or "").strip()
+        if source.source_type != "seed_query":
+            return raw_value
+
+        raw_query = raw_value
+        config = dict(self.integration.request_config or {})
+        config.update(source.config or {})
+        query_prefix = config.get("query_prefix", "")
+        query_suffix = config.get("query_suffix", "")
+        query = f"{query_prefix}{raw_query}{query_suffix}".strip()
+
+        template = config.get("search_url_template")
+        if template:
+            return template.format(query=quote_plus(query), raw_query=query)
+
+        query_param = config.get("query_param")
+        if query_param:
+            base_url = config.get("search_base_url") or self.integration.base_url
+            parsed = urlparse(base_url)
+            params = dict(parse_qs(parsed.query))
+            params[query_param] = [query]
+            return urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
+
+        return raw_query
 
     def get_client(self) -> httpx.Client:
         if self._client is None or self._client.is_closed:

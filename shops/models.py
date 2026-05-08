@@ -118,11 +118,20 @@ class ShopSource(models.Model):
         ("api_endpoint", "API endpoint"),
         ("seed_query", "Seed query"),
     ]
+    DISCOVERY_MODES = [
+        ("category_seed", "Category seed"),
+        ("query_seed", "Query seed"),
+        ("feed", "Feed"),
+        ("api_catalog", "API catalog"),
+    ]
 
     integration = models.ForeignKey(
         ShopIntegration, on_delete=models.CASCADE, related_name="sources",
     )
     source_type = models.CharField(max_length=30, choices=SOURCE_TYPES)
+    discovery_mode = models.CharField(
+        max_length=30, choices=DISCOVERY_MODES, blank=True, default="",
+    )
     value = models.TextField()
     config = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
@@ -137,10 +146,27 @@ class ShopSource(models.Model):
         indexes = [
             models.Index(fields=["integration", "is_active", "-priority"]),
             models.Index(fields=["source_type", "is_active"]),
+            models.Index(fields=["discovery_mode", "is_active"]),
         ]
 
+    def save(self, *args, **kwargs):
+        if not self.discovery_mode:
+            self.discovery_mode = self.default_discovery_mode_for(self.source_type)
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def default_discovery_mode_for(cls, source_type: str) -> str:
+        mapping = {
+            "category_url": "category_seed",
+            "search_template": "query_seed",
+            "seed_query": "query_seed",
+            "feed_url": "feed",
+            "api_endpoint": "api_catalog",
+        }
+        return mapping.get(source_type, "query_seed")
+
     def __str__(self):
-        return f"{self.integration.shop.name}: {self.source_type}"
+        return f"{self.integration.shop.name}: {self.discovery_mode or self.source_type}"
 
 
 class ShopCategoryAlias(models.Model):

@@ -14,7 +14,7 @@ from .models import (
 class ShopSourceInline(admin.TabularInline):
     model = ShopSource
     extra = 0
-    fields = ("source_type", "value", "priority", "is_active")
+    fields = ("discovery_mode", "source_type", "value", "priority", "is_active")
 
 
 @admin.register(Shop)
@@ -60,12 +60,27 @@ class ShopIntegrationAdmin(admin.ModelAdmin):
 @admin.register(ShopSource)
 class ShopSourceAdmin(admin.ModelAdmin):
     list_display = [
-        "integration", "source_type", "priority", "is_active", "value",
+        "integration", "discovery_mode", "source_type", "priority", "is_active", "value",
     ]
-    list_filter = ["source_type", "is_active", "integration__connector_type"]
+    list_filter = ["discovery_mode", "source_type", "is_active", "integration__connector_type"]
     search_fields = ["integration__shop__name", "value"]
     list_editable = ["priority", "is_active"]
     raw_id_fields = ["integration"]
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "integration", "discovery_mode", "source_type", "value", "config",
+                    "priority", "is_active",
+                ),
+                "description": (
+                    "Query-first sources usually use discovery mode query_seed/category_seed with "
+                    "seed keywords, category hints, search templates and limits in config."
+                ),
+            },
+        ),
+    )
     actions = ["trigger_discovery"]
 
     @admin.action(description="Run discovery for selected sources")

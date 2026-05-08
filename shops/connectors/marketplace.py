@@ -13,7 +13,7 @@ class MarketplaceTemplateConnector(BaseConnector):
     def discover_products(self, source) -> list[ProductOfferData]:
         template = self.integration.request_config.get("template")
         if template == "rozetka":
-            return self._discover_rozetka(source.value)
+            return self._discover_rozetka(self._resolve_discovery_url(source))
         raise ValueError(f"Unsupported marketplace template: {template}")
 
     def fetch_product_detail(self, product_link) -> ProductOfferData:
@@ -84,6 +84,9 @@ class MarketplaceTemplateConnector(BaseConnector):
                 time.sleep(wait)
 
         raise last_exc  # type: ignore[misc]
+
+    def _resolve_discovery_url(self, source) -> str:
+        return self.build_query_url(source)
 
     def _category_hint_from_url(self, url: str) -> str:
         from urllib.parse import urlparse

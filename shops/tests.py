@@ -4,12 +4,13 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from gifts.models import Category, Gift
+from shops.discovery import QueryBuilder
 from shops.connectors.factory import ConnectorFactory
 from shops.connectors.generic import HtmlSearchTemplateConnector, JsonApiConnector, XmlFeedConnector
 from shops.connectors.marketplace import MarketplaceTemplateConnector
 from shops.models import ProductLink, Shop, ShopCategoryAlias, ShopIntegration, ShopSource
 from shops.services import CategoryMatcher, MatchResult, _normalise
-from shops.tasks import process_discovered_product
+from shops.tasks import discover_source_products, process_discovered_product
 
 
 class NormaliseTestCase(TestCase):
@@ -140,6 +141,30 @@ class ConnectorDiscoveryTestCase(TestCase):
         self.assertEqual(products[0].name, "Gamepad")
         self.assertEqual(products[0].seller_name, "Seller A")
 
+    def test_json_api_connector_builds_query_url_from_seed_query(self):
+        integration = ShopIntegration.objects.create(
+            shop=self.shop,
+            connector_type="json_api",
+            base_url="https://api.example.com/search",
+            request_config={"search_url_template": "https://api.example.com/search?q={query}"},
+            field_mapping={
+                "items_path": "items",
+                "fields": {"title": "title", "url": "url", "price": "price"},
+            },
+        )
+        source = ShopSource.objects.create(
+            integration=integration,
+            source_type="seed_query",
+            discovery_mode="query_seed",
+            value="wireless gamepad",
+        )
+        connector = JsonApiConnector(integration)
+
+        with patch.object(connector, "fetch_json", return_value={"items": []}) as mocked:
+            connector.discover_products(source)
+
+        mocked.assert_called_once_with("https://api.example.com/search?q=wireless+gamepad")
+
     def test_xml_feed_connector_parses_feed(self):
         integration = ShopIntegration.objects.create(
             shop=self.shop,
@@ -188,6 +213,27 @@ class ConnectorDiscoveryTestCase(TestCase):
         self.assertEqual(len(products), 1)
         self.assertEqual(products[0].seller_name, "Seller B")
 
+    def test_html_connector_uses_seed_query_template(self):
+        integration = ShopIntegration.objects.create(
+            shop=self.shop,
+            connector_type="html_search_template",
+            base_url="https://html.example.com",
+            request_config={"search_url_template": "https://html.example.com/search?q={query}"},
+            field_mapping={"item_selector": ".missing", "fields": {}},
+        )
+        source = ShopSource.objects.create(
+            integration=integration,
+            source_type="seed_query",
+            discovery_mode="query_seed",
+            value="gift box",
+        )
+        connector = HtmlSearchTemplateConnector(integration)
+
+        with patch.object(connector, "fetch_text", return_value="") as mocked:
+            connector.discover_products(source)
+
+        mocked.assert_called_once_with("https://html.example.com/search?q=gift+box")
+
     def test_marketplace_connector_uses_template_handler(self):
         integration = ShopIntegration.objects.create(
             shop=self.shop,
@@ -203,6 +249,181 @@ class ConnectorDiscoveryTestCase(TestCase):
 
         mocked.assert_called_once_with(source.value)
         self.assertEqual(len(products), 1)
+
+    def test_marketplace_connector_uses_query_seed_template(self):
+        integration = ShopIntegration.objects.create(
+            shop=self.shop,
+            connector_type="marketplace_template",
+            base_url="https://rozetka.com.ua",
+            request_config={
+                "template": "rozetka",
+                "search_url_template": "https://rozetka.com.ua/ua/search/?text={query}",
+            },
+        )
+        source = ShopSource.objects.create(
+            integration=integration,
+            source_type="seed_query",
+            discovery_mode="query_seed",
+            value="xbox controller",
+        )
+        connector = MarketplaceTemplateConnector(integration)
+
+        with patch.object(connector, "_discover_rozetka", return_value=[MagicMock(name="Offer")]) as mocked:
+            products = connector.discover_products(source)
+
+        mocked.assert_called_once_with("https://rozetka.com.ua/ua/search/?text=xbox+controller")
+        self.assertEqual(len(products), 1)
+
+
+class QueryBuilderTestCase(TestCase):
+    def setUp(self):
+        self.shop = Shop.objects.create(
+            name="Query shop",
+            slug="query-shop",
+            website="https://example.com",
+            shop_type="specialized",
+        )
+        self.gaming = Category.objects.create(name="Gaming", slug="gaming-query")
+        self.shop.categories.add(self.gaming)
+        Gift.objects.create(
+            name="Xbox Wireless Controller",
+            slug="xbox-wireless-controller",
+            category=self.gaming,
+            is_active=True,
+            min_price=Decimal("1000.00"),
+            max_price=Decimal("2000.00"),
+        )
+        Gift.objects.create(
+            name="DualSense",
+            slug="dualsense-query",
+            category=self.gaming,
+            is_active=True,
+            min_price=Decimal("1500.00"),
+            max_price=Decimal("2500.00"),
+        )
+        ShopCategoryAlias.objects.create(
+            shop=self.shop,
+            raw_category="Gamepads",
+            normalized_category="gamepads",
+            category=self.gaming,
+            confidence=100,
+            status=ShopCategoryAlias.STATUS_MATCHED,
+        )
+        self.integration = ShopIntegration.objects.create(
+            shop=self.shop,
+            connector_type="html_search_template",
+            base_url="https://example.com",
+            request_config={"seed_keywords": ["controller", "gamepad"], "max_queries": 10},
+        )
+
+    def test_query_seed_source_generates_queries_from_categories_aliases_and_gifts(self):
+        source = ShopSource.objects.create(
+            integration=self.integration,
+            source_type="seed_query",
+            discovery_mode="query_seed",
+            value="wireless controller",
+            config={"seed_keywords": ["joystick"]},
+        )
+
+        requests = QueryBuilder().build(source)
+        queries = [request.value for request in requests]
+
+        self.assertIn("wireless controller", queries)
+        self.assertIn("controller", queries)
+        self.assertIn("joystick", queries)
+        self.assertIn("Gaming", queries)
+        self.assertIn("Gamepads", queries)
+        self.assertIn("Xbox Wireless Controller", queries)
+
+    def test_category_seed_source_prefers_category_terms_without_manual_urls(self):
+        source = ShopSource.objects.create(
+            integration=self.integration,
+            source_type="seed_query",
+            discovery_mode="category_seed",
+            value="",
+        )
+
+        requests = QueryBuilder().build(source)
+        queries = [request.value for request in requests]
+
+        self.assertIn("Gaming", queries)
+        self.assertIn("Gamepads", queries)
+        self.assertNotIn("DualSense", queries)
+
+    def test_direct_feed_source_is_preserved(self):
+        source = ShopSource.objects.create(
+            integration=ShopIntegration.objects.create(
+                shop=self.shop,
+                connector_type="xml_feed",
+                base_url="https://feed.example.com",
+            ),
+            source_type="feed_url",
+            discovery_mode="feed",
+            value="https://feed.example.com/feed.xml",
+        )
+
+        requests = QueryBuilder().build(source)
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].value, "https://feed.example.com/feed.xml")
+
+    def test_legacy_category_url_source_is_preserved_as_fallback(self):
+        source = ShopSource.objects.create(
+            integration=self.integration,
+            source_type="category_url",
+            discovery_mode="category_seed",
+            value="https://example.com/category/gamepads",
+        )
+
+        requests = QueryBuilder().build(source)
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].source_type, "category_url")
+        self.assertEqual(requests[0].value, "https://example.com/category/gamepads")
+
+
+class DiscoveryTaskQueryFlowTestCase(TestCase):
+    def setUp(self):
+        self.shop = Shop.objects.create(
+            name="Task shop",
+            slug="task-shop",
+            website="https://example.com",
+            shop_type="specialized",
+        )
+        gaming = Category.objects.create(name="Gaming", slug="gaming-task")
+        self.shop.categories.add(gaming)
+        Gift.objects.create(
+            name="Arcade Stick",
+            slug="arcade-stick",
+            category=gaming,
+            is_active=True,
+            min_price=Decimal("1000.00"),
+            max_price=Decimal("2000.00"),
+        )
+        self.integration = ShopIntegration.objects.create(
+            shop=self.shop,
+            connector_type="html_search_template",
+            base_url="https://example.com",
+            request_config={
+                "search_url_template": "https://example.com/search?q={query}",
+                "seed_keywords": ["arcade stick"],
+            },
+            field_mapping={"item_selector": ".card", "fields": {"title": ".title", "url": ".title", "price": ".price"}},
+        )
+        self.source = ShopSource.objects.create(
+            integration=self.integration,
+            source_type="seed_query",
+            discovery_mode="query_seed",
+            value="fight stick",
+        )
+
+    @patch("shops.tasks.process_discovered_product.delay")
+    @patch("shops.connectors.generic.HtmlSearchTemplateConnector.discover_products", return_value=[])
+    def test_discovery_task_runs_multiple_generated_queries(self, mocked_discover, mocked_process):
+        discover_source_products(self.source.id)
+
+        self.assertGreaterEqual(mocked_discover.call_count, 2)
+        self.assertEqual(mocked_process.call_count, 0)
 
 
 class ProductOfferIngestionTestCase(TestCase):

@@ -80,7 +80,7 @@ class ShopSourceSerializer(serializers.ModelSerializer):
     class Meta:
         model = ShopSource
         fields = [
-            "id", "integration", "source_type", "value", "config",
+            "id", "integration", "discovery_mode", "source_type", "value", "config",
             "is_active", "priority",
         ]
 

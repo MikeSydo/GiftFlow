@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote_plus
 from xml.etree import ElementTree
 
 from .base import BaseConnector, ProductOfferData
@@ -9,7 +8,7 @@ from .base import BaseConnector, ProductOfferData
 
 class JsonApiConnector(BaseConnector):
     def discover_products(self, source) -> list[ProductOfferData]:
-        payload = self.fetch_json(source.value)
+        payload = self.fetch_json(self._build_source_url(source))
         return self._parse_items(payload, source)
 
     def fetch_product_detail(self, product_link) -> ProductOfferData:
@@ -89,6 +88,9 @@ class JsonApiConnector(BaseConnector):
             )
 
         return results
+
+    def _build_source_url(self, source) -> str:
+        return self.build_query_url(source)
 
 
 class XmlFeedConnector(BaseConnector):
@@ -191,12 +193,4 @@ class HtmlSearchTemplateConnector(BaseConnector):
         )
 
     def _build_source_url(self, source) -> str:
-        if source.source_type == "seed_query":
-            template = (
-                source.config.get("search_url_template")
-                or self.integration.request_config.get("search_url_template")
-            )
-            if not template:
-                return source.value
-            return template.format(query=quote_plus(source.value))
-        return source.value
+        return self.build_query_url(source)

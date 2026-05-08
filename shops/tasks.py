@@ -7,6 +7,7 @@ from celery import shared_task
 from django.db.models import F, Max, Min, Q
 from django.utils import timezone
 
+from .discovery import QueryBuilder, request_as_namespace
 from .models import normalize_product_url
 
 logger = logging.getLogger("shops.tasks")
@@ -87,17 +88,26 @@ def discover_source_products(source_id: int):
         .get(id=source_id, is_active=True, integration__is_active=True)
     )
     connector = get_connector(source.integration)
+    requests = QueryBuilder().build(source)
 
     try:
         with connector:
-            products = connector.discover_products(source)
+            discovered_count = 0
+            request_count = len(requests)
+            for request in requests:
+                products = connector.discover_products(request_as_namespace(request))
+                discovered_count += len(products)
+                logger.info(
+                    "[%s] discovered %d products from source=%d request=%s",
+                    source.integration.shop.slug, len(products), source.id, request.value,
+                )
+                for product in products:
+                    process_discovered_product.delay(asdict(product), source.id)
 
         logger.info(
-            "[%s] discovered %d products from source=%d",
-            source.integration.shop.slug, len(products), source.id,
+            "[%s] discovered %d products from source=%d across %d request(s)",
+            source.integration.shop.slug, discovered_count, source.id, request_count,
         )
-        for product in products:
-            process_discovered_product.delay(asdict(product), source.id)
     except Exception as exc:
         logger.exception(
             "[%s] discovery failed for source=%d: %s",
