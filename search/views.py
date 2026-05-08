@@ -1,6 +1,8 @@
 from django.shortcuts import render
 from django.http import JsonResponse
+from django.db.models import OuterRef, Subquery
 from gifts.models import Gift, Category, Tag
+from shops.models import ProductLink
 
 
 def gift_search(request):
@@ -44,8 +46,16 @@ def search_gifts_api(request):
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    qs = Gift.objects.filter(is_active=True).select_related("category").prefetch_related(
-        "tags"
+    best_offer_subquery = ProductLink.objects.filter(
+        gift_id=OuterRef("pk"),
+        in_stock=True,
+    ).order_by("price", "id")
+
+    qs = (
+        Gift.objects.filter(is_active=True)
+        .select_related("category")
+        .prefetch_related("tags")
+        .annotate(best_offer_id=Subquery(best_offer_subquery.values("id")[:1]))
     )
 
     # Filters
@@ -87,18 +97,42 @@ def search_gifts_api(request):
 
     qs = qs.order_by("-popularity_score", "-created_at")[:20]
 
+    offer_ids = [gift.best_offer_id for gift in qs if gift.best_offer_id]
+    best_offers = {
+        offer.id: offer
+        for offer in ProductLink.objects.select_related("shop").filter(id__in=offer_ids)
+    }
+
     results = []
     for gift in qs:
+        best_offer = best_offers.get(gift.best_offer_id)
         results.append(
             {
                 "id": gift.id,
                 "title": gift.name,
                 "short_description": gift.short_description or "",
-                "image": gift.image.url if gift.image else "",
+                "image": (
+                    gift.image.url if gift.image else
+                    gift.image_url or
+                    (best_offer.image_url if best_offer else "")
+                ),
                 "category": gift.category.name if gift.category else "",
                 "min_price": str(gift.min_price or 0),
                 "popularity_score": gift.popularity_score,
                 "tags": [t.name for t in gift.tags.all()],
+                "best_offer": (
+                    {
+                        "id": best_offer.id,
+                        "shop": best_offer.shop.name,
+                        "seller_name": best_offer.seller_name or best_offer.shop.name,
+                        "price": str(best_offer.price),
+                        "original_price": str(best_offer.original_price) if best_offer.original_price else None,
+                        "product_url": best_offer.product_url,
+                        "image_url": best_offer.image_url,
+                        "is_marketplace_offer": best_offer.is_marketplace_offer,
+                    }
+                    if best_offer else None
+                ),
             }
         )
 

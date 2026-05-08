@@ -1,7 +1,6 @@
 (function () {
   "use strict";
 
-  // State
   const state = {
     currentStep: 1,
     category: null,
@@ -14,7 +13,6 @@
     relationships: [],
   };
 
-  // DOM REFS
   const panels = {
     1: document.getElementById("step1"),
     2: document.getElementById("step2"),
@@ -24,38 +22,40 @@
 
   const progressFill = document.getElementById("progressFill");
   const stepIndicators = document.querySelectorAll(".wizard-step");
-
   const ageSlider = document.getElementById("ageSlider");
   const ageValue = document.getElementById("ageValue");
   const budgetMin = document.getElementById("budgetMin");
   const budgetMax = document.getElementById("budgetMax");
-
   const resultsContainer = document.getElementById("resultsContainer");
   const resultsCount = document.getElementById("resultsCount");
 
-  // Navigation
-  function goToStep(n) {
-    if (panels[state.currentStep]) panels[state.currentStep].classList.remove("wizard-panel--active");
-    state.currentStep = n;
-    if (panels[n]) panels[n].classList.add("wizard-panel--active");
+  function goToStep(step) {
+    if (panels[state.currentStep]) {
+      panels[state.currentStep].classList.remove("wizard-panel--active");
+    }
+    state.currentStep = step;
+    if (panels[step]) {
+      panels[step].classList.add("wizard-panel--active");
+    }
     updateProgress();
-
-    // If entering step 4 → fire search
-    if (n === 4) fireSearch();
+    if (step === 4) {
+      fireSearch();
+    }
   }
 
   function updateProgress() {
-    const pct = (state.currentStep / 4) * 100;
-    if (progressFill) progressFill.style.width = pct + "%";
+    const percentage = (state.currentStep / 4) * 100;
+    if (progressFill) {
+      progressFill.style.width = percentage + "%";
+    }
 
-    stepIndicators.forEach((el) => {
-      const s = parseInt(el.dataset.step, 10);
-      el.classList.toggle("wizard-step--active", s === state.currentStep);
-      el.classList.toggle("wizard-step--done", s < state.currentStep);
+    stepIndicators.forEach((element) => {
+      const step = parseInt(element.dataset.step, 10);
+      element.classList.toggle("wizard-step--active", step === state.currentStep);
+      element.classList.toggle("wizard-step--done", step < state.currentStep);
     });
   }
 
-  // Wire next / back buttons
   document.getElementById("next1")?.addEventListener("click", () => goToStep(2));
   document.getElementById("back2")?.addEventListener("click", () => goToStep(1));
   document.getElementById("next2")?.addEventListener("click", () => goToStep(3));
@@ -63,85 +63,85 @@
   document.getElementById("back4")?.addEventListener("click", () => goToStep(3));
   document.getElementById("searchBtn")?.addEventListener("click", () => goToStep(4));
 
-  // Single-select cards (category)
   function initSingleSelect(gridId, field) {
     const grid = document.getElementById(gridId);
     if (!grid) return;
 
-    grid.addEventListener("click", (e) => {
-      const card = e.target.closest(".wizard-card");
+    grid.addEventListener("click", (event) => {
+      const card = event.target.closest(".wizard-card");
       if (!card) return;
 
-      grid.querySelectorAll(".wizard-card").forEach((c) => c.classList.remove("wizard-card--active"));
+      grid.querySelectorAll(".wizard-card").forEach((node) => {
+        node.classList.remove("wizard-card--active");
+      });
       card.classList.add("wizard-card--active");
       state[field] = card.dataset.value;
     });
   }
-  initSingleSelect("categoriesGrid", "category");
 
-  // Multi-select cards (occasions)
   function initMultiSelect(gridId, field) {
     const grid = document.getElementById(gridId);
     if (!grid) return;
 
-    grid.addEventListener("click", (e) => {
-      const card = e.target.closest(".wizard-card");
+    grid.addEventListener("click", (event) => {
+      const card = event.target.closest(".wizard-card");
       if (!card) return;
 
-      const val = card.dataset.value;
-      const arr = state[field];
-      const idx = arr.indexOf(val);
+      const value = card.dataset.value;
+      const values = state[field];
+      const index = values.indexOf(value);
 
-      if (idx === -1) {
-        arr.push(val);
+      if (index === -1) {
+        values.push(value);
         card.classList.add("wizard-card--active");
       } else {
-        arr.splice(idx, 1);
+        values.splice(index, 1);
         card.classList.remove("wizard-card--active");
       }
     });
   }
-  initMultiSelect("occasionsGrid", "occasions");
 
-  // Multi-select pills (interests, relationships)
   function initPillGroup(gridId, field) {
     const grid = document.getElementById(gridId);
     if (!grid) return;
 
-    grid.addEventListener("click", (e) => {
-      const pill = e.target.closest(".wizard-pill");
+    grid.addEventListener("click", (event) => {
+      const pill = event.target.closest(".wizard-pill");
       if (!pill || !pill.dataset.field) return;
 
-      const val = pill.dataset.value;
-      const arr = state[field];
-      const idx = arr.indexOf(val);
+      const value = pill.dataset.value;
+      const values = state[field];
+      const index = values.indexOf(value);
 
-      if (idx === -1) {
-        arr.push(val);
+      if (index === -1) {
+        values.push(value);
         pill.classList.add("wizard-pill--active");
       } else {
-        arr.splice(idx, 1);
+        values.splice(index, 1);
         pill.classList.remove("wizard-pill--active");
       }
     });
   }
+
+  initSingleSelect("categoriesGrid", "category");
+  initMultiSelect("occasionsGrid", "occasions");
   initPillGroup("interestsGrid", "interests");
   initPillGroup("relationGrid", "relationships");
 
-  // Gender pills (single)
   const genderContainer = document.querySelector(".wizard-field__options--gender");
   if (genderContainer) {
-    genderContainer.addEventListener("click", (e) => {
-      const pill = e.target.closest(".wizard-pill");
+    genderContainer.addEventListener("click", (event) => {
+      const pill = event.target.closest(".wizard-pill");
       if (!pill) return;
 
-      genderContainer.querySelectorAll(".wizard-pill").forEach((p) => p.classList.remove("wizard-pill--active"));
+      genderContainer.querySelectorAll(".wizard-pill").forEach((node) => {
+        node.classList.remove("wizard-pill--active");
+      });
       pill.classList.add("wizard-pill--active");
       state.gender = pill.dataset.value;
     });
   }
 
-  // Age slider
   if (ageSlider && ageValue) {
     ageSlider.addEventListener("input", () => {
       state.age = parseInt(ageSlider.value, 10);
@@ -149,7 +149,6 @@
     });
   }
 
-  // Budget inputs
   if (budgetMin) {
     budgetMin.addEventListener("input", () => {
       state.budgetMin = budgetMin.value || null;
@@ -161,34 +160,39 @@
     });
   }
 
-  // Budget presets
-  document.querySelectorAll(".wizard-preset").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const min = btn.dataset.min;
-      const max = btn.dataset.max;
-      if (budgetMin) { budgetMin.value = min; state.budgetMin = min; }
-      if (budgetMax) { budgetMax.value = max; state.budgetMax = max; }
+  document.querySelectorAll(".wizard-preset").forEach((button) => {
+    button.addEventListener("click", () => {
+      const min = button.dataset.min;
+      const max = button.dataset.max;
+      if (budgetMin) {
+        budgetMin.value = min;
+        state.budgetMin = min;
+      }
+      if (budgetMax) {
+        budgetMax.value = max;
+        state.budgetMax = max;
+      }
 
-      // highlight active preset
-      document.querySelectorAll(".wizard-preset").forEach((b) => b.classList.remove("wizard-preset--active"));
-      btn.classList.add("wizard-preset--active");
+      document.querySelectorAll(".wizard-preset").forEach((node) => {
+        node.classList.remove("wizard-preset--active");
+      });
+      button.classList.add("wizard-preset--active");
     });
   });
 
-  // Fire search (AJAX)
   function fireSearch() {
     if (!resultsContainer) return;
 
-    // Show loading
     resultsContainer.innerHTML = `
       <div class="results-loading" id="resultsLoading">
         <div class="results-loading__spinner"></div>
         <p>Шукаємо подарунки...</p>
       </div>
     `;
-    if (resultsCount) resultsCount.textContent = "Шукаємо...";
+    if (resultsCount) {
+      resultsCount.textContent = "Шукаємо...";
+    }
 
-    // Build params
     const params = new URLSearchParams();
     if (state.category) params.set("category", state.category);
     if (state.gender) params.set("gender", state.gender);
@@ -196,40 +200,40 @@
     if (state.budgetMin) params.set("budget_min", state.budgetMin);
     if (state.budgetMax) params.set("budget_max", state.budgetMax);
 
-    // Merge all tag arrays
     const allTags = [...state.occasions, ...state.interests, ...state.relationships];
-    if (allTags.length) params.set("tags", allTags.join(","));
+    if (allTags.length) {
+      params.set("tags", allTags.join(","));
+    }
 
-    const url = window.SEARCH_API_URL + "?" + params.toString();
-
-    fetch(url, {
+    fetch(window.SEARCH_API_URL + "?" + params.toString(), {
       headers: { "X-Requested-With": "XMLHttpRequest" },
     })
-      .then((res) => {
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        return response.json();
       })
       .then((data) => renderResults(data))
-      .catch((err) => {
-        console.error("Search failed:", err);
+      .catch((error) => {
+        console.error("Search failed:", error);
         resultsContainer.innerHTML = `
           <div class="results-empty">
             <div class="results-empty__icon">⚠️</div>
             <h3>Помилка завантаження</h3>
-            <p>Будь ласка, попробуйте знову або зміните параметри.</p>
+            <p>Спробуйте ще раз або змініть параметри пошуку.</p>
           </div>
         `;
       });
   }
 
-  // Render results
   function renderResults(data) {
     const { results, count } = data;
 
     if (resultsCount) {
       resultsCount.textContent = count
         ? `Знайдено ${count} подарунок${count === 1 ? "" : count < 5 ? "а" : "ів"}`
-        : "Жоден подарунок не знайдений";
+        : "Подарунків не знайдено";
     }
 
     if (!results || !results.length) {
@@ -237,7 +241,7 @@
         <div class="results-empty">
           <div class="results-empty__icon">🎁</div>
           <h3>Нічого не знайдено</h3>
-          <p>Попробуйте зlooser параметри або оберіть іншу категорію.</p>
+          <p>Спробуйте змінити параметри або обрати іншу категорію.</p>
         </div>
       `;
       return;
@@ -246,18 +250,26 @@
     const grid = document.createElement("div");
     grid.className = "results-grid";
 
-    results.forEach((gift, i) => {
+    results.forEach((gift, index) => {
       const card = document.createElement("article");
       card.className = "result-card";
-      card.style.setProperty("--delay", i * 0.06 + "s");
-      card.style.animationDelay = i * 0.06 + "s";
+      card.style.setProperty("--delay", index * 0.06 + "s");
+      card.style.animationDelay = index * 0.06 + "s";
 
+      const bestOffer = gift.best_offer || null;
       const tagsHtml = gift.tags
-        .map((t) => `<span class="result-card__tag">${escHtml(t)}</span>`)
+        .map((tag) => `<span class="result-card__tag">${escHtml(tag)}</span>`)
         .join("");
-
       const imgHtml = gift.image
         ? `<img src="${escHtml(gift.image)}" alt="${escHtml(gift.title)}" />`
+        : "";
+      const offerHtml = bestOffer
+        ? `
+          <div class="result-card__shop">${escHtml(bestOffer.seller_name || bestOffer.shop)}</div>
+          <a class="result-card__link" href="${escHtml(bestOffer.product_url)}" target="_blank" rel="noopener noreferrer">
+            Купити за ${escHtml(bestOffer.price)} ₴
+          </a>
+        `
         : "";
 
       card.innerHTML = `
@@ -267,7 +279,8 @@
           <h3 class="result-card__title">${escHtml(gift.title)}</h3>
           ${gift.short_description ? `<p class="result-card__desc">${escHtml(gift.short_description)}</p>` : ""}
           ${tagsHtml ? `<div class="result-card__tags">${tagsHtml}</div>` : ""}
-          <div class="result-card__price">від ${gift.min_price} ₴</div>
+          <div class="result-card__price">від ${escHtml(gift.min_price)} ₴</div>
+          ${offerHtml}
         </div>
       `;
 
@@ -278,24 +291,22 @@
     resultsContainer.appendChild(grid);
   }
 
-  // Utility
-  function escHtml(str) {
-    const d = document.createElement("div");
-    d.appendChild(document.createTextNode(str));
-    return d.innerHTML;
+  function escHtml(value) {
+    const container = document.createElement("div");
+    container.appendChild(document.createTextNode(value == null ? "" : String(value)));
+    return container.innerHTML;
   }
 
-  // Init: check if URL has ?category= (from home page "see all" link)
   (function initFromURL() {
     const urlParams = new URLSearchParams(window.location.search);
-    const cat = urlParams.get("category");
-    if (cat) {
-      state.category = cat;
-      const cards = document.querySelectorAll("#categoriesGrid .wizard-card");
-      cards.forEach((c) => {
-        if (c.dataset.value === cat) c.classList.add("wizard-card--active");
-      });
-    }
-  })();
+    const category = urlParams.get("category");
+    if (!category) return;
 
+    state.category = category;
+    document.querySelectorAll("#categoriesGrid .wizard-card").forEach((card) => {
+      if (card.dataset.value === category) {
+        card.classList.add("wizard-card--active");
+      }
+    });
+  })();
 })();

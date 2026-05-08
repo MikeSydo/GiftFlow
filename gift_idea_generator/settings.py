@@ -12,10 +12,13 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 from datetime import timedelta
-from celery.schedules import crontab
+from urllib.parse import quote
+
 import dj_database_url
+from celery.schedules import crontab
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,6 +37,53 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+
+
+def build_database_config() -> dict:
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return dj_database_url.parse(database_url)
+
+    db_name = os.getenv("DB_NAME")
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_host = os.getenv("DB_HOST", "127.0.0.1")
+    db_port = os.getenv("DB_PORT", "5432")
+
+    if not all([db_name, db_user, db_password]):
+        raise ImproperlyConfigured(
+            "Set DATABASE_URL or DB_NAME, DB_USER, and DB_PASSWORD.",
+        )
+
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": db_name,
+        "USER": db_user,
+        "PASSWORD": db_password,
+        "HOST": db_host,
+        "PORT": db_port,
+    }
+
+
+def build_redis_url() -> str:
+    broker_url = os.getenv("CELERY_BROKER_URL")
+    if broker_url:
+        return broker_url
+
+    redis_host = os.getenv("REDIS_HOST", "127.0.0.1")
+    redis_port = os.getenv("REDIS_PORT", "6379")
+    redis_db = os.getenv("REDIS_DB", "0")
+
+    redis_password = os.getenv("REDIS_PASSWORD")
+    if redis_password:
+        quoted_password = quote(redis_password, safe="")
+        return f"redis://:{quoted_password}@{redis_host}:{redis_port}/{redis_db}"
+
+    return f"redis://{redis_host}:{redis_port}/{redis_db}"
+
+
+SCRAPING_USER_AGENT = os.getenv("SCRAPING_USER_AGENT", "").strip()
+DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "INFO").upper()
 
 
 # Application definition
@@ -94,9 +144,7 @@ WSGI_APPLICATION = 'gift_idea_generator.wsgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
-    'default': dj_database_url.parse(
-            os.environ.get('DATABASE_URL')
-        )
+    'default': build_database_config(),
 }
 
 
@@ -149,7 +197,7 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Celery
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_BROKER_URL = build_redis_url()
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
@@ -196,14 +244,14 @@ LOGGING = {
         },
     },
     'loggers': {
-        'shops.scrapers': {
+        'shops.connectors': {
             'handlers': ['console', 'scraper_file'],
-            'level': 'INFO',
+            'level': DJANGO_LOG_LEVEL,
             'propagate': False,
         },
         'shops.tasks': {
             'handlers': ['console', 'scraper_file'],
-            'level': 'INFO',
+            'level': DJANGO_LOG_LEVEL,
             'propagate': False,
         },
     },

@@ -2,6 +2,7 @@ from django.test import TestCase, Client
 from django.urls import reverse
 from decimal import Decimal
 from gifts.models import Gift, Category, Tag
+from shops.models import ProductLink, Shop
 
 
 class SearchGiftsAPITestCase(TestCase):
@@ -91,6 +92,51 @@ class SearchGiftsAPITestCase(TestCase):
             is_featured=False
         )
         self.gift3.tags.add(self.tag_birthday, self.tag_friend)
+
+        self.shop1 = Shop.objects.create(
+            name="Rozetka",
+            slug="rozetka",
+            website="https://rozetka.com.ua",
+            shop_type="marketplace",
+        )
+        self.shop2 = Shop.objects.create(
+            name="Yabluka",
+            slug="yabluka",
+            website="https://yabluka.ua",
+            shop_type="brand",
+        )
+
+        ProductLink.objects.create(
+            gift=self.gift1,
+            shop=self.shop1,
+            product_url="https://rozetka.com.ua/pad-1/",
+            product_name="Smartphone offer A",
+            price=Decimal("550.00"),
+            original_price=Decimal("600.00"),
+            in_stock=True,
+            seller_name="Seller A",
+            external_offer_id="offer-a",
+        )
+        ProductLink.objects.create(
+            gift=self.gift1,
+            shop=self.shop2,
+            product_url="https://yabluka.ua/pad-1/",
+            product_name="Smartphone offer B",
+            price=Decimal("530.00"),
+            in_stock=True,
+            seller_name="Yabluka",
+            external_offer_id="offer-b",
+        )
+        ProductLink.objects.create(
+            gift=self.gift2,
+            shop=self.shop1,
+            product_url="https://rozetka.com.ua/headphones-1/",
+            product_name="Headphones offer",
+            price=Decimal("120.00"),
+            in_stock=True,
+            seller_name="Seller C",
+            external_offer_id="offer-c",
+        )
 
         # Inactive gift (should not appear in results)
         self.gift4 = Gift.objects.create(
@@ -297,7 +343,19 @@ class SearchGiftsAPITestCase(TestCase):
             self.assertIn('min_price', gift)
             self.assertIn('popularity_score', gift)
             self.assertIn('tags', gift)
+            self.assertIn('best_offer', gift)
             self.assertIsInstance(gift['tags'], list)
+
+    def test_search_api_returns_best_offer(self):
+        response = self.client.get('/search/api/')
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        smartphone = next(item for item in data["results"] if item["title"] == "Smartphone")
+
+        self.assertIsNotNone(smartphone["best_offer"])
+        self.assertEqual(smartphone["best_offer"]["shop"], "Yabluka")
+        self.assertEqual(smartphone["best_offer"]["price"], "530.00")
 
     def test_search_api_method_not_allowed(self):
         """Test POST method returns error"""
