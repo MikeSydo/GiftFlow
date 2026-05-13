@@ -402,6 +402,231 @@ def get_stale_hotline_gifts(limit: int = 100, *, older_than: timedelta | None = 
     return list(queryset[:limit])
 
 
+def _canonical_website(value: str | None) -> str:
+    if not value:
+        return "https://hotline.ua"
+    normalized = value.strip().rstrip("/")
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return normalized
+    return f"https://{normalized.lstrip('/')}"
+
+
+def build_unique_shop_slug(
+    name: str,
+    *,
+    seller_external_id: str | None = None,
+    website: str | None = None,
+    exclude_id: int | None = None,
+) -> str:
+    website_slug = ""
+    if website:
+        website_slug = slugify(re.sub(r"^https?://", "", website).split("/")[0])
+
+    base_slug = (
+        slugify(seller_external_id or "")
+        or website_slug
+        or slugify(name)
+        or f"shop-{timezone.now().timestamp()}"
+    )[:100]
+    candidate = base_slug
+    counter = 2
+    while True:
+        existing = Shop.objects.filter(slug=candidate)
+        if exclude_id is not None:
+            existing = existing.exclude(id=exclude_id)
+        if not existing.exists():
+            return candidate
+        suffix = f"-{counter}"
+        candidate = f"{base_slug[: max(1, 100 - len(suffix))]}{suffix}"
+        counter += 1
+
+
+def get_or_create_hotline_merchant_shop(offer) -> Shop:
+    website = _canonical_website(getattr(offer, "seller_url", None))
+
+    shop = None
+    seller_name = (offer.seller_name or "").strip()
+    if seller_name:
+        shop = Shop.objects.filter(name__iexact=seller_name).first()
+    if shop is None and website != "https://hotline.ua":
+        shop = Shop.objects.filter(website__iexact=website).first()
+
+    if shop is not None:
+        update_fields: list[str] = []
+        if website and shop.website != website:
+            shop.website = website
+            update_fields.append("website")
+        if not shop.is_active:
+            shop.is_active = True
+            update_fields.append("is_active")
+        if update_fields:
+            shop.save(update_fields=update_fields + ["updated_at"])
+        return shop
+
+    name = build_unique_shop_name(seller_name or website)
+    shop = Shop.objects.create(
+        name=name,
+        slug=build_unique_shop_slug(
+            name,
+            seller_external_id=getattr(offer, "seller_external_id", None),
+            website=website,
+        ),
+        website=website,
+        shop_type="specialized",
+        specialization="Hotline merchant",
+        is_active=True,
+    )
+    return shop
+
+
+def build_unique_shop_name(value: str, *, exclude_id: int | None = None) -> str:
+    base_name = re.sub(r"\s+", " ", (value or "").strip())[:100] or "Hotline merchant"
+    existing = Shop.objects.filter(name__iexact=base_name)
+    if exclude_id is not None:
+        existing = existing.exclude(id=exclude_id)
+    if not existing.exists():
+        return base_name
+
+    counter = 2
+    while True:
+        suffix = f" ({counter})"
+        candidate = f"{base_name[: max(1, 100 - len(suffix))]}{suffix}"
+        existing = Shop.objects.filter(name__iexact=candidate)
+        if exclude_id is not None:
+            existing = existing.exclude(id=exclude_id)
+        if not existing.exists():
+            return candidate
+        counter += 1
+
+
+def upsert_hotline_merchant_offer(gift: Gift, shop: Shop, offer) -> tuple[ProductLink, bool, bool]:
+    now = timezone.now()
+    normalized_url = normalize_product_url(offer.product_url)
+    existing = ProductLink.objects.filter(
+        shop=shop,
+        external_offer_id=offer.external_offer_id,
+    ).first()
+    previous_snapshot = None
+    if existing is not None:
+        previous_snapshot = {
+            "gift_id": existing.gift_id,
+            "product_url": existing.product_url,
+            "product_name": existing.product_name,
+            "price": existing.price,
+            "original_price": existing.original_price,
+            "in_stock": existing.in_stock,
+            "seller_name": existing.seller_name,
+            "seller_external_id": existing.seller_external_id,
+            "seller_url": existing.seller_url,
+        }
+
+    link, created = ProductLink.objects.update_or_create(
+        shop=shop,
+        external_offer_id=offer.external_offer_id,
+        defaults={
+            "gift": gift,
+            "product_url": offer.product_url,
+            "normalized_product_url": normalized_url,
+            "product_name": offer.title[:300],
+            "price": offer.price,
+            "original_price": offer.original_price,
+            "in_stock": True,
+            "image_url": (offer.image_url or gift.image_url or "")[:1000] or None,
+            "last_checked": now,
+            "last_price_update": now,
+            "external_product_id": offer.external_product_id,
+            "seller_name": (offer.seller_name or shop.name)[:200],
+            "seller_external_id": (offer.seller_external_id or "")[:200] or None,
+            "seller_url": offer.seller_url or shop.website,
+            "is_marketplace_offer": True,
+            "discovered_via_source": None,
+        },
+    )
+
+    latest_snapshot = (
+        PriceHistory.objects.filter(product_link=link)
+        .order_by("-recorded_at")
+        .values("price", "in_stock")
+        .first()
+    )
+    if created or latest_snapshot != {"price": offer.price, "in_stock": True}:
+        PriceHistory.objects.create(
+            product_link=link,
+            price=offer.price,
+            in_stock=True,
+        )
+
+    current_snapshot = {
+        "gift_id": link.gift_id,
+        "product_url": link.product_url,
+        "product_name": link.product_name,
+        "price": link.price,
+        "original_price": link.original_price,
+        "in_stock": link.in_stock,
+        "seller_name": link.seller_name,
+        "seller_external_id": link.seller_external_id,
+        "seller_url": link.seller_url,
+    }
+    changed = created or previous_snapshot != current_snapshot
+    return link, created, changed
+
+
+def mark_missing_hotline_offers_inactive(gift: Gift, active_offer_ids: set[str]) -> int:
+    now = timezone.now()
+    queryset = ProductLink.objects.filter(
+        gift=gift,
+        is_marketplace_offer=True,
+        external_product_id=gift.source_product_id,
+    )
+    if active_offer_ids:
+        queryset = queryset.exclude(external_offer_id__in=active_offer_ids)
+
+    stale_count = 0
+    for link in queryset:
+        snapshot_changed = link.in_stock
+        link.in_stock = False
+        link.last_checked = now
+        link.save(update_fields=["in_stock", "last_checked", "updated_at"])
+        if snapshot_changed:
+            PriceHistory.objects.create(
+                product_link=link,
+                price=link.price,
+                in_stock=False,
+            )
+            stale_count += 1
+    return stale_count
+
+
+def refresh_shop_product_counts(shop_ids: set[int]) -> None:
+    for shop_id in shop_ids:
+        Shop.objects.filter(id=shop_id).update(
+            total_products=ProductLink.objects.filter(shop_id=shop_id).count(),
+        )
+
+
+def sync_hotline_product_offers(gift: Gift, offers: list) -> dict[str, int]:
+    active_offer_ids: set[str] = set()
+    touched_shop_ids: set[int] = set()
+    updated_count = 0
+
+    for offer in offers:
+        shop = get_or_create_hotline_merchant_shop(offer)
+        touched_shop_ids.add(shop.id)
+        active_offer_ids.add(offer.external_offer_id)
+        _, _, changed = upsert_hotline_merchant_offer(gift=gift, shop=shop, offer=offer)
+        if changed:
+            updated_count += 1
+
+    stale_count = mark_missing_hotline_offers_inactive(gift, active_offer_ids)
+    refresh_shop_product_counts(touched_shop_ids)
+    refresh_gift_price_cache(gift.id)
+    return {
+        "offers_count": len(offers),
+        "updated_count": updated_count + stale_count,
+        "stale_count": stale_count,
+    }
+
+
 def base_gift_queryset() -> QuerySet[Gift]:
     best_offer_subquery = ProductLink.objects.filter(
         gift_id=OuterRef("pk"),

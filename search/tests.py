@@ -1,8 +1,15 @@
 from django.test import TestCase, Client
 from django.urls import reverse
+from django.utils import timezone
 from decimal import Decimal
+from unittest.mock import patch
+
 from gifts.models import Gift, Category, Tag
-from shops.models import ProductLink, Shop
+from shops.models import PriceHistory, ProductLink, Shop
+
+from .hotline import HotlineMerchantOffer, HotlineOffer, HotlineAdapter
+from .models import IngestionRun, SearchIngestionJob
+from .tasks import ingest_hotline_search, refresh_hotline_product
 
 
 class SearchGiftsAPITestCase(TestCase):
@@ -11,6 +18,9 @@ class SearchGiftsAPITestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.client = Client()
+        self.cache_delay_patcher = patch("shops.tasks.update_gift_price_cache.delay")
+        self.cache_delay_patcher.start()
+        self.addCleanup(self.cache_delay_patcher.stop)
 
         # Create categories
         self.category1 = Category.objects.create(
@@ -412,3 +422,299 @@ class SearchGiftsAPITestCase(TestCase):
         titles = [gift['title'] for gift in data['results']]
 
         self.assertNotIn('Inactive Gift', titles)
+
+    @patch("search.tasks.ingest_hotline_search.delay")
+    def test_search_api_query_cache_miss_returns_pending(self, mocked_delay):
+        response = self.client.get('/search/api/', {'q': 'gamepad'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['status'], SearchIngestionJob.STATUS_PENDING)
+        self.assertEqual(data['count'], 0)
+
+        job = SearchIngestionJob.objects.get(normalized_query='gamepad')
+        self.assertEqual(job.query, 'gamepad')
+        mocked_delay.assert_called_once_with(job.id)
+
+    @patch("search.tasks.ingest_hotline_search.delay")
+    def test_search_api_does_not_duplicate_active_job(self, mocked_delay):
+        SearchIngestionJob.objects.create(
+            source=SearchIngestionJob.SOURCE_HOTLINE,
+            query='gamepad',
+            normalized_query='gamepad',
+            request_filters={},
+            status=SearchIngestionJob.STATUS_RUNNING,
+        )
+
+        response = self.client.get('/search/api/', {'q': 'gamepad'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['status'], SearchIngestionJob.STATUS_RUNNING)
+        mocked_delay.assert_not_called()
+
+    def test_search_api_completed_job_returns_scoped_results(self):
+        job = SearchIngestionJob.objects.create(
+            source=SearchIngestionJob.SOURCE_HOTLINE,
+            query='gamepad',
+            normalized_query='gamepad',
+            request_filters={},
+            status=SearchIngestionJob.STATUS_COMPLETED,
+            finished_at=timezone.now(),
+        )
+        job.gifts.add(self.gift1, self.gift2)
+
+        response = self.client.get('/search/api/', {'q': 'gamepad'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['status'], SearchIngestionJob.STATUS_COMPLETED)
+        self.assertEqual(data['count'], 2)
+        titles = [gift['title'] for gift in data['results']]
+        self.assertIn('Smartphone', titles)
+        self.assertIn('Headphones', titles)
+        self.assertNotIn('Novel Book', titles)
+
+
+class HotlineSearchIngestionTaskTestCase(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(
+            name="Gaming",
+            slug="gaming",
+            is_active=True,
+        )
+        self.active_gift = Gift.objects.create(
+            name="Gamepad F310",
+            slug="gamepad-f310",
+            category=self.category,
+            gender="U",
+            age_min=0,
+            age_max=100,
+            min_price=Decimal("1200.00"),
+            max_price=Decimal("1200.00"),
+            popularity_score=10,
+            is_active=True,
+        )
+        self.job = SearchIngestionJob.objects.create(
+            source=SearchIngestionJob.SOURCE_HOTLINE,
+            query="gamepad",
+            normalized_query="gamepad",
+            request_filters={},
+        )
+
+    @staticmethod
+    def _offer(product_id: str, title: str, price: str) -> HotlineOffer:
+        return HotlineOffer(
+            external_product_id=product_id,
+            external_offer_id=f"hotline-product-{product_id}",
+            title=title,
+            product_url=f"https://hotline.ua/ua/product/{product_id}/",
+            image_url="https://hotline.ua/img/example.jpg",
+            price=Decimal(price),
+            original_price=Decimal(price) + Decimal("100.00"),
+        )
+
+    @patch("shops.tasks.update_gift_price_cache.delay")
+    @patch("search.tasks.HotlineAdapter.search")
+    def test_ingestion_creates_or_updates_hotline_offer_records(self, mocked_search, mocked_cache):
+        mocked_search.return_value = [
+            self._offer("238947", "Gamepad F310", "1355.00"),
+            self._offer("238959", "Wireless Gamepad F710", "2148.00"),
+        ]
+
+        ingest_hotline_search(self.job.id)
+
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, SearchIngestionJob.STATUS_COMPLETED)
+        self.assertEqual(self.job.result_count, 2)
+        self.assertEqual(self.job.gift_count, 2)
+
+        hotline_shop = Shop.objects.get(slug="hotline")
+        self.assertEqual(hotline_shop.name, "Hotline")
+
+        links = ProductLink.objects.filter(shop=hotline_shop).order_by("external_offer_id")
+        self.assertEqual(links.count(), 2)
+        self.assertEqual(links.first().external_product_id, "238947")
+        self.assertTrue(self.job.gifts.filter(id=self.active_gift.id).exists())
+
+        new_gift = Gift.objects.get(name="Wireless Gamepad F710")
+        self.assertFalse(new_gift.is_active)
+        self.assertEqual(
+            PriceHistory.objects.filter(product_link__shop=hotline_shop).count(),
+            2,
+        )
+        mocked_cache.assert_called()
+
+    @patch("shops.tasks.update_gift_price_cache.delay")
+    @patch("search.tasks.HotlineAdapter.search")
+    def test_ingestion_handles_empty_results(self, mocked_search, mocked_cache):
+        mocked_search.return_value = []
+
+        ingest_hotline_search(self.job.id)
+
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, SearchIngestionJob.STATUS_COMPLETED)
+        self.assertEqual(self.job.result_count, 0)
+        self.assertEqual(self.job.gift_count, 0)
+        self.assertEqual(self.job.gifts.count(), 0)
+        mocked_cache.assert_not_called()
+
+    @patch("shops.tasks.update_gift_price_cache.delay")
+    @patch("search.tasks.HotlineAdapter.search")
+    def test_ingestion_deduplicates_repeated_runs(self, mocked_search, mocked_cache):
+        mocked_search.return_value = [self._offer("238947", "Gamepad F310", "1355.00")]
+
+        ingest_hotline_search(self.job.id)
+        ingest_hotline_search(self.job.id)
+
+        hotline_shop = Shop.objects.get(slug="hotline")
+        self.assertEqual(
+            ProductLink.objects.filter(shop=hotline_shop, external_offer_id="hotline-product-238947").count(),
+            1,
+        )
+
+    @patch("search.tasks.HotlineAdapter.search")
+    def test_ingestion_marks_failed_without_dropping_existing_gifts(self, mocked_search):
+        self.job.gifts.add(self.active_gift)
+        mocked_search.side_effect = RuntimeError("parser failure")
+
+        with self.assertRaises(RuntimeError):
+            ingest_hotline_search(self.job.id)
+
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, SearchIngestionJob.STATUS_FAILED)
+        self.assertEqual(self.job.gifts.count(), 1)
+        self.assertIn("parser failure", self.job.last_error)
+
+
+class HotlineProductOfferParserTestCase(TestCase):
+    def test_parse_product_html_extracts_merchant_offers_and_old_price(self):
+        html = """
+        <script>
+        window.__NUXT__={offers:{edges:[
+            {node:{_id:"101",conversionUrl:"\\u002Fgo\\u002Fprice\\u002F101\\u002F",descriptionShort:"Steam Deck 256 GB",firmId:77,firmTitle:"GRO",firmExtraInfo:{website:"gro.ua"},price:19499,visible:true}},
+            {node:{_id:"102",conversionUrl:"\\u002Fgo\\u002Fprice\\u002F102\\u002F",descriptionFull:"Steam Deck 256 GB",firmId:78,firmTitle:"UPPS.UA",firmExtraInfo:{website:"upps.ua"},price:20599,visible:true}}
+        ],pageInfo:{}},sales:{sales:{"101":{oldPrice:21395}}}};
+        </script>
+        """
+
+        adapter = HotlineAdapter()
+        offers = adapter._parse_product_html(html, external_product_id="21916104")
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].external_offer_id, "101")
+        self.assertEqual(offers[0].seller_name, "GRO")
+        self.assertEqual(offers[0].seller_url, "https://gro.ua")
+        self.assertEqual(offers[0].original_price, Decimal("21395"))
+        self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
+
+
+class HotlineProductRefreshTaskTestCase(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(
+            name="Gaming",
+            slug="gaming",
+            is_active=True,
+        )
+        self.gift = Gift.objects.create(
+            name="Steam Deck 256 GB",
+            slug="steam-deck-256-gb",
+            category=self.category,
+            gender="U",
+            age_min=0,
+            age_max=100,
+            min_price=Decimal("20000.00"),
+            max_price=Decimal("22000.00"),
+            popularity_score=10,
+            is_active=True,
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+            source_product_id="21916104",
+            source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
+        )
+        self.stale_shop = Shop.objects.create(
+            name="Old Shop",
+            slug="old-shop",
+            website="https://old-shop.example",
+            shop_type="specialized",
+        )
+        self.stale_link = ProductLink.objects.create(
+            gift=self.gift,
+            shop=self.stale_shop,
+            product_url="https://hotline.ua/go/price/999/",
+            product_name="Steam Deck 256 GB",
+            price=Decimal("21500.00"),
+            original_price=Decimal("22000.00"),
+            in_stock=True,
+            last_checked=timezone.now(),
+            last_price_update=timezone.now(),
+            external_offer_id="999",
+            external_product_id="21916104",
+            seller_name="Old Shop",
+            seller_url="https://old-shop.example",
+            is_marketplace_offer=True,
+        )
+        PriceHistory.objects.create(
+            product_link=self.stale_link,
+            price=Decimal("21500.00"),
+            in_stock=True,
+        )
+
+    @staticmethod
+    def _merchant_offer(
+        offer_id: str,
+        seller_name: str,
+        website: str,
+        price: str,
+        old_price: str | None = None,
+    ) -> HotlineMerchantOffer:
+        return HotlineMerchantOffer(
+            external_product_id="21916104",
+            external_offer_id=offer_id,
+            title="Steam Deck 256 GB",
+            product_url=f"https://hotline.ua/go/price/{offer_id}/",
+            price=Decimal(price),
+            original_price=Decimal(old_price) if old_price else None,
+            seller_name=seller_name,
+            seller_external_id=f"seller-{offer_id}",
+            seller_url=f"https://{website}",
+        )
+
+    @patch("search.tasks.HotlineAdapter.fetch_product_offers")
+    def test_refresh_hotline_product_creates_merchants_and_marks_missing_offers_stale(self, mocked_fetch):
+        mocked_fetch.return_value = [
+            self._merchant_offer("101", "GRO", "gro.ua", "19499", "21395"),
+            self._merchant_offer("102", "UPPS.UA", "upps.ua", "20599"),
+        ]
+
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
+            gift=self.gift,
+            source_product_id=self.gift.source_product_id,
+        )
+
+        refresh_hotline_product(run.id)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, IngestionRun.STATUS_COMPLETED)
+        self.assertEqual(run.discovered_count, 2)
+
+        offers = ProductLink.objects.filter(gift=self.gift).order_by("external_offer_id")
+        self.assertEqual(offers.count(), 3)
+
+        gro_offer = offers.get(external_offer_id="101")
+        self.assertEqual(gro_offer.shop.name, "GRO")
+        self.assertEqual(gro_offer.price, Decimal("19499"))
+        self.assertEqual(gro_offer.original_price, Decimal("21395"))
+        self.assertTrue(gro_offer.in_stock)
+        self.assertTrue(gro_offer.is_marketplace_offer)
+
+        self.stale_link.refresh_from_db()
+        self.assertFalse(self.stale_link.in_stock)
+        self.assertEqual(
+            PriceHistory.objects.filter(product_link=self.stale_link).order_by("-recorded_at").first().in_stock,
+            False,
+        )
+
+        self.gift.refresh_from_db()
+        self.assertEqual(self.gift.min_price, Decimal("19499.00"))
+        self.assertEqual(self.gift.max_price, Decimal("20599.00"))

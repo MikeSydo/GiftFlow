@@ -20,6 +20,7 @@ from .services import (
     mark_ingestion_run_running,
     match_or_create_gift,
     refresh_gift_price_cache,
+    sync_hotline_product_offers,
     upsert_hotline_gift_from_summary,
     upsert_hotline_offer,
 )
@@ -125,13 +126,25 @@ def refresh_hotline_product(run_id: int) -> None:
     mark_ingestion_run_running(run)
 
     try:
-        # Iteration 1 only guarantees the scheduler-driven product refresh backbone.
-        # Merchant offer ingestion is implemented in iteration 2.
-        mark_ingestion_run_completed(run, discovered_count=1, updated_count=0)
+        with HotlineAdapter() as adapter:
+            offers = adapter.fetch_product_offers(
+                product_url=gift.source_product_url,
+                external_product_id=gift.source_product_id,
+            )
+
+        sync_result = sync_hotline_product_offers(gift, offers)
+        mark_ingestion_run_completed(
+            run,
+            discovered_count=sync_result["offers_count"],
+            updated_count=sync_result["updated_count"],
+        )
         logger.info(
-            "[hotline] product refresh placeholder completed gift=%d source_product_id=%s",
+            "[hotline] product refresh completed gift=%d source_product_id=%s offers=%d updated=%d stale=%d",
             gift.id,
             gift.source_product_id,
+            sync_result["offers_count"],
+            sync_result["updated_count"],
+            sync_result["stale_count"],
         )
     except Exception as exc:
         mark_ingestion_run_failed(run, exc)
