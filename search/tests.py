@@ -423,57 +423,34 @@ class SearchGiftsAPITestCase(TestCase):
 
         self.assertNotIn('Inactive Gift', titles)
 
-    @patch("search.tasks.ingest_hotline_search.delay")
-    def test_search_api_query_cache_miss_returns_pending(self, mocked_delay):
-        response = self.client.get('/search/api/', {'q': 'gamepad'})
+    def test_search_api_query_filters_local_results(self):
+        response = self.client.get('/search/api/', {'q': 'head'})
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data['status'], SearchIngestionJob.STATUS_PENDING)
-        self.assertEqual(data['count'], 0)
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(data['results'][0]['title'], 'Headphones')
 
-        job = SearchIngestionJob.objects.get(normalized_query='gamepad')
-        self.assertEqual(job.query, 'gamepad')
-        mocked_delay.assert_called_once_with(job.id)
-
-    @patch("search.tasks.ingest_hotline_search.delay")
-    def test_search_api_does_not_duplicate_active_job(self, mocked_delay):
-        SearchIngestionJob.objects.create(
-            source=SearchIngestionJob.SOURCE_HOTLINE,
-            query='gamepad',
-            normalized_query='gamepad',
-            request_filters={},
-            status=SearchIngestionJob.STATUS_RUNNING,
-        )
-
-        response = self.client.get('/search/api/', {'q': 'gamepad'})
+    def test_search_api_query_searches_tags_and_categories(self):
+        response = self.client.get('/search/api/', {'q': 'electronics'})
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data['status'], SearchIngestionJob.STATUS_RUNNING)
-        mocked_delay.assert_not_called()
-
-    def test_search_api_completed_job_returns_scoped_results(self):
-        job = SearchIngestionJob.objects.create(
-            source=SearchIngestionJob.SOURCE_HOTLINE,
-            query='gamepad',
-            normalized_query='gamepad',
-            request_filters={},
-            status=SearchIngestionJob.STATUS_COMPLETED,
-            finished_at=timezone.now(),
-        )
-        job.gifts.add(self.gift1, self.gift2)
-
-        response = self.client.get('/search/api/', {'q': 'gamepad'})
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(data['status'], SearchIngestionJob.STATUS_COMPLETED)
         self.assertEqual(data['count'], 2)
         titles = [gift['title'] for gift in data['results']]
         self.assertIn('Smartphone', titles)
         self.assertIn('Headphones', titles)
-        self.assertNotIn('Novel Book', titles)
+
+    def test_search_api_returns_detail_url_for_gifts(self):
+        response = self.client.get('/search/api/', {'q': 'smart'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(
+            data['results'][0]['detail_url'],
+            reverse('gifts:gift_detail', args=[self.gift1.slug]),
+        )
 
 
 class HotlineSearchIngestionTaskTestCase(TestCase):

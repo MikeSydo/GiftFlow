@@ -3,6 +3,7 @@
 
   const state = {
     currentStep: 1,
+    query: "",
     category: null,
     occasions: [],
     gender: "",
@@ -11,6 +12,7 @@
     budgetMax: null,
     interests: [],
     relationships: [],
+    activeRequestId: 0,
   };
 
   const panels = {
@@ -26,6 +28,7 @@
   const ageValue = document.getElementById("ageValue");
   const budgetMin = document.getElementById("budgetMin");
   const budgetMax = document.getElementById("budgetMax");
+  const queryInput = document.getElementById("queryInput");
   const resultsContainer = document.getElementById("resultsContainer");
   const resultsCount = document.getElementById("resultsCount");
 
@@ -84,7 +87,7 @@
     if (!grid) return;
 
     grid.addEventListener("click", (event) => {
-      const card = event.target.closest(".wizard-card");
+      const card = event.target.closest(".wizard-card, .wizard-pill");
       if (!card) return;
 
       const value = card.dataset.value;
@@ -93,40 +96,18 @@
 
       if (index === -1) {
         values.push(value);
-        card.classList.add("wizard-card--active");
+        card.classList.add("wizard-card--active", "wizard-pill--active");
       } else {
         values.splice(index, 1);
-        card.classList.remove("wizard-card--active");
-      }
-    });
-  }
-
-  function initPillGroup(gridId, field) {
-    const grid = document.getElementById(gridId);
-    if (!grid) return;
-
-    grid.addEventListener("click", (event) => {
-      const pill = event.target.closest(".wizard-pill");
-      if (!pill || !pill.dataset.field) return;
-
-      const value = pill.dataset.value;
-      const values = state[field];
-      const index = values.indexOf(value);
-
-      if (index === -1) {
-        values.push(value);
-        pill.classList.add("wizard-pill--active");
-      } else {
-        values.splice(index, 1);
-        pill.classList.remove("wizard-pill--active");
+        card.classList.remove("wizard-card--active", "wizard-pill--active");
       }
     });
   }
 
   initSingleSelect("categoriesGrid", "category");
   initMultiSelect("occasionsGrid", "occasions");
-  initPillGroup("interestsGrid", "interests");
-  initPillGroup("relationGrid", "relationships");
+  initMultiSelect("interestsGrid", "interests");
+  initMultiSelect("relationGrid", "relationships");
 
   const genderContainer = document.querySelector(".wizard-field__options--gender");
   if (genderContainer) {
@@ -142,6 +123,12 @@
     });
   }
 
+  if (queryInput) {
+    queryInput.addEventListener("input", () => {
+      state.query = queryInput.value.trim();
+    });
+  }
+
   if (ageSlider && ageValue) {
     ageSlider.addEventListener("input", () => {
       state.age = parseInt(ageSlider.value, 10);
@@ -154,6 +141,7 @@
       state.budgetMin = budgetMin.value || null;
     });
   }
+
   if (budgetMax) {
     budgetMax.addEventListener("input", () => {
       state.budgetMax = budgetMax.value || null;
@@ -180,20 +168,9 @@
     });
   });
 
-  function fireSearch() {
-    if (!resultsContainer) return;
-
-    resultsContainer.innerHTML = `
-      <div class="results-loading" id="resultsLoading">
-        <div class="results-loading__spinner"></div>
-        <p>Шукаємо подарунки...</p>
-      </div>
-    `;
-    if (resultsCount) {
-      resultsCount.textContent = "Шукаємо...";
-    }
-
+  function buildSearchParams() {
     const params = new URLSearchParams();
+    if (state.query) params.set("q", state.query);
     if (state.category) params.set("category", state.category);
     if (state.gender) params.set("gender", state.gender);
     if (state.age) params.set("age", state.age);
@@ -205,6 +182,48 @@
       params.set("tags", allTags.join(","));
     }
 
+    return params;
+  }
+
+  function renderLoading(message) {
+    if (!resultsContainer) return;
+
+    resultsContainer.innerHTML = `
+      <div class="results-loading">
+        <div class="results-loading__spinner"></div>
+        <p>${escHtml(message)}</p>
+      </div>
+    `;
+  }
+
+  function renderFailure(message) {
+    if (!resultsContainer) return;
+
+    resultsContainer.innerHTML = `
+      <div class="results-empty">
+        <div class="results-empty__icon">!</div>
+        <h3>Search failed</h3>
+        <p>${escHtml(message || "Unable to load results.")}</p>
+      </div>
+    `;
+
+    if (resultsCount) {
+      resultsCount.textContent = "Search failed";
+    }
+  }
+
+  function fireSearch() {
+    if (!resultsContainer) return;
+
+    state.activeRequestId += 1;
+    const requestId = state.activeRequestId;
+    const params = buildSearchParams();
+
+    renderLoading("Searching gift ideas...");
+    if (resultsCount) {
+      resultsCount.textContent = "Searching...";
+    }
+
     fetch(window.SEARCH_API_URL + "?" + params.toString(), {
       headers: { "X-Requested-With": "XMLHttpRequest" },
     })
@@ -214,34 +233,35 @@
         }
         return response.json();
       })
-      .then((data) => renderResults(data))
+      .then((data) => {
+        if (requestId !== state.activeRequestId) {
+          return;
+        }
+        renderResults(data);
+      })
       .catch((error) => {
+        if (requestId !== state.activeRequestId) {
+          return;
+        }
         console.error("Search failed:", error);
-        resultsContainer.innerHTML = `
-          <div class="results-empty">
-            <div class="results-empty__icon">⚠️</div>
-            <h3>Помилка завантаження</h3>
-            <p>Спробуйте ще раз або змініть параметри пошуку.</p>
-          </div>
-        `;
+        renderFailure("Unable to load search results.");
       });
   }
 
   function renderResults(data) {
-    const { results, count } = data;
+    const results = data.results || [];
+    const count = data.count || 0;
 
     if (resultsCount) {
-      resultsCount.textContent = count
-        ? `Знайдено ${count} подарунок${count === 1 ? "" : count < 5 ? "а" : "ів"}`
-        : "Подарунків не знайдено";
+      resultsCount.textContent = count ? `Found ${count} gift results` : "No gift results found";
     }
 
-    if (!results || !results.length) {
+    if (!results.length) {
       resultsContainer.innerHTML = `
         <div class="results-empty">
-          <div class="results-empty__icon">🎁</div>
-          <h3>Нічого не знайдено</h3>
-          <p>Спробуйте змінити параметри або обрати іншу категорію.</p>
+          <div class="results-empty__icon">?</div>
+          <h3>No matches</h3>
+          <p>Try another query or adjust the filters.</p>
         </div>
       `;
       return;
@@ -257,7 +277,7 @@
       card.style.animationDelay = index * 0.06 + "s";
 
       const bestOffer = gift.best_offer || null;
-      const tagsHtml = gift.tags
+      const tagsHtml = (gift.tags || [])
         .map((tag) => `<span class="result-card__tag">${escHtml(tag)}</span>`)
         .join("");
       const imgHtml = gift.image
@@ -266,21 +286,24 @@
       const offerHtml = bestOffer
         ? `
           <div class="result-card__shop">${escHtml(bestOffer.seller_name || bestOffer.shop)}</div>
-          <a class="result-card__link" href="${escHtml(bestOffer.product_url)}" target="_blank" rel="noopener noreferrer">
-            Купити за ${escHtml(bestOffer.price)} ₴
-          </a>
+          <div class="result-card__price-sub">Best offer ${escHtml(bestOffer.price)} UAH</div>
         `
-        : "";
+        : `<div class="result-card__price-sub">Offers will appear on the detail page</div>`;
 
       card.innerHTML = `
         <div class="result-card__media">${imgHtml}</div>
         <div class="result-card__body">
           ${gift.category ? `<div class="result-card__cat">${escHtml(gift.category)}</div>` : ""}
-          <h3 class="result-card__title">${escHtml(gift.title)}</h3>
+          <h3 class="result-card__title">
+            <a href="${escHtml(gift.detail_url)}">${escHtml(gift.title)}</a>
+          </h3>
           ${gift.short_description ? `<p class="result-card__desc">${escHtml(gift.short_description)}</p>` : ""}
           ${tagsHtml ? `<div class="result-card__tags">${tagsHtml}</div>` : ""}
-          <div class="result-card__price">від ${escHtml(gift.min_price)} ₴</div>
+          <div class="result-card__price">from ${escHtml(gift.min_price)} UAH</div>
           ${offerHtml}
+          <a class="result-card__link" href="${escHtml(gift.detail_url)}">
+            View stores
+          </a>
         </div>
       `;
 
@@ -300,13 +323,20 @@
   (function initFromURL() {
     const urlParams = new URLSearchParams(window.location.search);
     const category = urlParams.get("category");
-    if (!category) return;
+    const query = urlParams.get("q");
 
-    state.category = category;
-    document.querySelectorAll("#categoriesGrid .wizard-card").forEach((card) => {
-      if (card.dataset.value === category) {
-        card.classList.add("wizard-card--active");
-      }
-    });
+    if (category) {
+      state.category = category;
+      document.querySelectorAll("#categoriesGrid .wizard-card").forEach((card) => {
+        if (card.dataset.value === category) {
+          card.classList.add("wizard-card--active");
+        }
+      });
+    }
+
+    if (query && queryInput) {
+      state.query = query;
+      queryInput.value = query;
+    }
   })();
 })();

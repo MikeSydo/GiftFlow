@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Max, Min, OuterRef, Q, QuerySet, Subquery
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 from rapidfuzz import fuzz
@@ -642,6 +643,16 @@ def base_gift_queryset() -> QuerySet[Gift]:
 
 
 def apply_gift_filters(qs: QuerySet[Gift], params) -> QuerySet[Gift]:
+    query = normalize_search_query(params.get("q", ""))
+    if query:
+        qs = qs.filter(
+            Q(name__icontains=query)
+            | Q(short_description__icontains=query)
+            | Q(description__icontains=query)
+            | Q(category__name__icontains=query)
+            | Q(tags__name__icontains=query)
+        ).distinct()
+
     category_id = params.get("category")
     if category_id and str(category_id).isdigit():
         qs = qs.filter(category_id=int(category_id))
@@ -694,6 +705,7 @@ def serialize_gift_results(qs: QuerySet[Gift], limit: int = MAX_RESULTS) -> tupl
                 "id": gift.id,
                 "title": gift.name,
                 "slug": gift.slug,
+                "detail_url": reverse("gifts:gift_detail", args=[gift.slug]),
                 "short_description": gift.short_description or "",
                 "image": (
                     gift.image.url
@@ -723,6 +735,7 @@ def serialize_gift_results(qs: QuerySet[Gift], limit: int = MAX_RESULTS) -> tupl
                     if best_offer
                     else None
                 ),
+                "best_offer_url": best_offer.product_url if best_offer else "",
             },
         )
 
