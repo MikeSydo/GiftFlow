@@ -394,7 +394,6 @@ def upsert_hotline_merchant_offer(gift: Gift, shop: Shop, offer) -> tuple[Produc
             "seller_external_id": (offer.seller_external_id or "")[:200] or None,
             "seller_url": offer.seller_url or shop.website,
             "is_marketplace_offer": True,
-            "discovered_via_source": None,
         },
     )
 

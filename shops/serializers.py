@@ -6,8 +6,6 @@ from .models import (
     Shop,
     ShopClick,
     ShopCategoryAlias,
-    ShopIntegration,
-    ShopSource,
 )
 
 
@@ -64,25 +62,6 @@ class ShopClickCreateSerializer(serializers.ModelSerializer):
         model = ShopClick
         fields = ["product_link", "session_key", "referrer"]
     # ip_address and user_agent are set automatically in the view
-
-
-class ShopIntegrationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShopIntegration
-        fields = [
-            "id", "shop", "connector_type", "base_url", "auth_type",
-            "auth_config", "request_config", "field_mapping",
-            "is_active", "priority",
-        ]
-
-
-class ShopSourceSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShopSource
-        fields = [
-            "id", "integration", "discovery_mode", "source_type", "value", "config",
-            "is_active", "priority",
-        ]
 
 
 class ShopCategoryAliasSerializer(serializers.ModelSerializer):

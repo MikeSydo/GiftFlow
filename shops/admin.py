@@ -6,19 +6,7 @@ from .models import (
     Shop,
     ShopCategoryAlias,
     ShopClick,
-    ShopIntegration,
-    ShopSource,
 )
-
-
-class ShopSourceInline(admin.TabularInline):
-    model = ShopSource
-    extra = 0
-    fields = ("discovery_mode", "source_type", "value", "priority", "is_active")
-    can_delete = False
-
-    def has_add_permission(self, request, obj=None):
-        return False
 
 
 @admin.register(Shop)
@@ -31,64 +19,6 @@ class ShopAdmin(admin.ModelAdmin):
     search_fields = ["name", "website"]
     prepopulated_fields = {"slug": ("name",)}
     list_editable = ["priority", "is_active"]
-
-
-@admin.register(ShopIntegration)
-class ShopIntegrationAdmin(admin.ModelAdmin):
-    list_display = [
-        "shop", "connector_type", "base_url", "priority", "is_active",
-    ]
-    list_filter = ["connector_type", "is_active"]
-    search_fields = ["shop__name", "base_url"]
-    list_editable = ["priority", "is_active"]
-    raw_id_fields = ["shop"]
-    readonly_fields = [
-        "shop", "connector_type", "base_url", "auth_type", "auth_config",
-        "request_config", "field_mapping", "is_active", "priority",
-        "created_at", "updated_at",
-    ]
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
-@admin.register(ShopSource)
-class ShopSourceAdmin(admin.ModelAdmin):
-    list_display = [
-        "integration", "discovery_mode", "source_type", "priority", "is_active", "value",
-    ]
-    list_filter = ["discovery_mode", "source_type", "is_active", "integration__connector_type"]
-    search_fields = ["integration__shop__name", "value"]
-    list_editable = ["priority", "is_active"]
-    raw_id_fields = ["integration"]
-    readonly_fields = [
-        "integration", "discovery_mode", "source_type", "value", "config",
-        "priority", "is_active", "created_at", "updated_at",
-    ]
-    fieldsets = (
-        (
-            "Legacy source configuration",
-            {
-                "fields": (
-                    "integration", "discovery_mode", "source_type", "value", "config",
-                    "priority", "is_active",
-                ),
-                "description": (
-                    "Legacy only. Active catalog ingestion is scheduled through Hotline seeds and "
-                    "does not read ShopSource records."
-                ),
-            },
-        ),
-    )
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
 
 
 @admin.register(ShopCategoryAlias)
@@ -126,21 +56,13 @@ class ProductLinkAdmin(admin.ModelAdmin):
         "product_name", "sku", "product_url", "original_category_name",
         "seller_name", "external_offer_id", "external_product_id",
     ]
-    raw_id_fields = ["gift", "shop", "discovered_via_source"]
+    raw_id_fields = ["gift", "shop"]
     readonly_fields = [
         "click_count", "last_checked", "last_price_update",
         "category_confidence", "image_url", "normalized_product_url",
     ]
     list_editable = ["needs_category_review"]
-    actions = ["trigger_price_update", "verify_links", "approve_categories"]
-
-    @admin.action(description="Update prices for selected offers")
-    def trigger_price_update(self, request, queryset):
-        from .tasks import update_product_price
-
-        for link in queryset:
-            update_product_price.delay(link.id)
-        self.message_user(request, f"Price update started for {queryset.count()} offers")
+    actions = ["verify_links", "approve_categories"]
 
     @admin.action(description="Verify selected links")
     def verify_links(self, request, queryset):

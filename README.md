@@ -72,8 +72,6 @@ This command only enqueues seed refresh tasks. The worker then:
 - seed refresh every 6 hours
 - stale product refresh every hour in batches of 100
 
-The active product flow no longer depends on admin-created `ShopSource` or `ShopIntegration` records.
-
 ## Search and detail flow
 
 - `/search/api/` returns only DB-backed gift results

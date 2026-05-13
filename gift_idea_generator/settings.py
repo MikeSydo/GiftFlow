@@ -207,15 +207,9 @@ CELERY_TASK_ROUTES = {
     'search.tasks.enqueue_stale_hotline_product_refreshes': {'queue': 'prices'},
     'search.tasks.refresh_hotline_seed': {'queue': 'discovery'},
     'search.tasks.refresh_hotline_product': {'queue': 'prices'},
-    'shops.tasks.discover_source_products': {'queue': 'discovery'},
-    'shops.tasks.discover_shop_products': {'queue': 'discovery'},
-    'shops.tasks.process_discovered_product': {'queue': 'discovery'},
-    'shops.tasks.update_product_price': {'queue': 'prices'},
     'shops.tasks.update_gift_price_cache': {'queue': 'prices'},
     'shops.tasks.verify_product_link': {'queue': 'verification'},
     'shops.tasks.increment_shop_click': {'queue': 'prices'},
-    'shops.tasks.trigger_all_shop_discovery': {'queue': 'discovery'},
-    'shops.tasks.trigger_all_price_updates': {'queue': 'prices'},
     'shops.tasks.trigger_all_verifications': {'queue': 'verification'},
 }
 
@@ -256,11 +250,6 @@ LOGGING = {
         },
     },
     'loggers': {
-        'shops.connectors': {
-            'handlers': ['console', 'scraper_file'],
-            'level': DJANGO_LOG_LEVEL,
-            'propagate': False,
-        },
         'shops.tasks': {
             'handlers': ['console', 'scraper_file'],
             'level': DJANGO_LOG_LEVEL,

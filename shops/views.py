@@ -1,4 +1,5 @@
 from datetime import timedelta
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from django.db.models import BooleanField, Case, Exists, OuterRef, Value, When
 from django.utils import timezone
@@ -7,10 +8,19 @@ from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .connectors.base import BaseConnector
 from .filters import ProductLinkFilter
 from .models import PriceHistory, ProductLink, Shop, ShopClick
 from .serializers import PriceHistorySerializer, ProductLinkSerializer, ShopSerializer
+
+
+def build_affiliate_url(url: str, affiliate_parameter: str) -> str:
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    if "=" in affiliate_parameter:
+        key, value = affiliate_parameter.split("=", 1)
+        query[key] = [value]
+    new_query = urlencode(query, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
 
 
 def annotate_best_offer(queryset):
@@ -114,9 +124,7 @@ class ProductLinkClickView(APIView):
 
         affiliate_url = link.product_url
         if link.shop.has_affiliate and link.shop.affiliate_parameter:
-            affiliate_url = BaseConnector.build_affiliate_url(
-                link.product_url, link.shop.affiliate_parameter,
-            )
+            affiliate_url = build_affiliate_url(link.product_url, link.shop.affiliate_parameter)
 
         return Response({"affiliate_url": affiliate_url}, status=status.HTTP_200_OK)
 

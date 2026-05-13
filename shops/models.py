@@ -67,108 +67,6 @@ class Shop(models.Model):
         return self.name
 
 
-class ShopIntegration(models.Model):
-    CONNECTOR_TYPES = [
-        ("json_api", "JSON API"),
-        ("xml_feed", "XML Feed"),
-        ("html_search_template", "HTML Search Template"),
-        ("marketplace_template", "Marketplace Template"),
-    ]
-
-    AUTH_TYPES = [
-        ("none", "None"),
-        ("bearer_token", "Bearer token"),
-        ("api_key_header", "API key in header"),
-        ("api_key_query", "API key in query"),
-        ("basic", "Basic auth"),
-    ]
-
-    shop = models.ForeignKey(
-        Shop, on_delete=models.CASCADE, related_name="integrations",
-    )
-    connector_type = models.CharField(max_length=50, choices=CONNECTOR_TYPES)
-    base_url = models.URLField(max_length=500)
-    auth_type = models.CharField(max_length=30, choices=AUTH_TYPES, default="none")
-    auth_config = models.JSONField(default=dict, blank=True)
-    request_config = models.JSONField(default=dict, blank=True)
-    field_mapping = models.JSONField(default=dict, blank=True)
-    is_active = models.BooleanField(default=True)
-    priority = models.IntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-priority", "id"]
-        verbose_name = "Shop integration"
-        verbose_name_plural = "Shop integrations"
-        indexes = [
-            models.Index(fields=["shop", "is_active", "-priority"]),
-            models.Index(fields=["connector_type", "is_active"]),
-        ]
-
-    def __str__(self):
-        return f"{self.shop.name} [{self.connector_type}]"
-
-
-class ShopSource(models.Model):
-    SOURCE_TYPES = [
-        ("category_url", "Category URL"),
-        ("search_template", "Search template"),
-        ("feed_url", "Feed URL"),
-        ("api_endpoint", "API endpoint"),
-        ("seed_query", "Seed query"),
-    ]
-    DISCOVERY_MODES = [
-        ("category_seed", "Category seed"),
-        ("query_seed", "Query seed"),
-        ("feed", "Feed"),
-        ("api_catalog", "API catalog"),
-    ]
-
-    integration = models.ForeignKey(
-        ShopIntegration, on_delete=models.CASCADE, related_name="sources",
-    )
-    source_type = models.CharField(max_length=30, choices=SOURCE_TYPES)
-    discovery_mode = models.CharField(
-        max_length=30, choices=DISCOVERY_MODES, blank=True, default="",
-    )
-    value = models.TextField()
-    config = models.JSONField(default=dict, blank=True)
-    is_active = models.BooleanField(default=True)
-    priority = models.IntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-priority", "id"]
-        verbose_name = "Shop source"
-        verbose_name_plural = "Shop sources"
-        indexes = [
-            models.Index(fields=["integration", "is_active", "-priority"]),
-            models.Index(fields=["source_type", "is_active"]),
-            models.Index(fields=["discovery_mode", "is_active"]),
-        ]
-
-    def save(self, *args, **kwargs):
-        if not self.discovery_mode:
-            self.discovery_mode = self.default_discovery_mode_for(self.source_type)
-        super().save(*args, **kwargs)
-
-    @classmethod
-    def default_discovery_mode_for(cls, source_type: str) -> str:
-        mapping = {
-            "category_url": "category_seed",
-            "search_template": "query_seed",
-            "seed_query": "query_seed",
-            "feed_url": "feed",
-            "api_endpoint": "api_catalog",
-        }
-        return mapping.get(source_type, "query_seed")
-
-    def __str__(self):
-        return f"{self.integration.shop.name}: {self.discovery_mode or self.source_type}"
-
-
 class ShopCategoryAlias(models.Model):
     STATUS_PENDING = "pending"
     STATUS_MATCHED = "matched"
@@ -251,11 +149,6 @@ class ProductLink(models.Model):
     seller_external_id = models.CharField(max_length=200, blank=True, null=True)
     seller_url = models.URLField(max_length=500, blank=True, null=True)
     is_marketplace_offer = models.BooleanField(default=False)
-    discovered_via_source = models.ForeignKey(
-        ShopSource, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="product_links",
-    )
-
     # Category matching fields
     original_category_name = models.CharField(
         max_length=300, blank=True, default='',
