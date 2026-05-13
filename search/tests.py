@@ -7,9 +7,9 @@ from unittest.mock import patch
 from gifts.models import Gift, Category, Tag
 from shops.models import PriceHistory, ProductLink, Shop
 
-from .hotline import HotlineMerchantOffer, HotlineOffer, HotlineAdapter
-from .models import IngestionRun, SearchIngestionJob
-from .tasks import ingest_hotline_search, refresh_hotline_product
+from .hotline import HotlineAdapter, HotlineMerchantOffer
+from .models import IngestionRun
+from .tasks import refresh_hotline_product
 
 
 class SearchGiftsAPITestCase(TestCase):
@@ -451,117 +451,6 @@ class SearchGiftsAPITestCase(TestCase):
             data['results'][0]['detail_url'],
             reverse('gifts:gift_detail', args=[self.gift1.slug]),
         )
-
-
-class HotlineSearchIngestionTaskTestCase(TestCase):
-    def setUp(self):
-        self.category = Category.objects.create(
-            name="Gaming",
-            slug="gaming",
-            is_active=True,
-        )
-        self.active_gift = Gift.objects.create(
-            name="Gamepad F310",
-            slug="gamepad-f310",
-            category=self.category,
-            gender="U",
-            age_min=0,
-            age_max=100,
-            min_price=Decimal("1200.00"),
-            max_price=Decimal("1200.00"),
-            popularity_score=10,
-            is_active=True,
-        )
-        self.job = SearchIngestionJob.objects.create(
-            source=SearchIngestionJob.SOURCE_HOTLINE,
-            query="gamepad",
-            normalized_query="gamepad",
-            request_filters={},
-        )
-
-    @staticmethod
-    def _offer(product_id: str, title: str, price: str) -> HotlineOffer:
-        return HotlineOffer(
-            external_product_id=product_id,
-            external_offer_id=f"hotline-product-{product_id}",
-            title=title,
-            product_url=f"https://hotline.ua/ua/product/{product_id}/",
-            image_url="https://hotline.ua/img/example.jpg",
-            price=Decimal(price),
-            original_price=Decimal(price) + Decimal("100.00"),
-        )
-
-    @patch("shops.tasks.update_gift_price_cache.delay")
-    @patch("search.tasks.HotlineAdapter.search")
-    def test_ingestion_creates_or_updates_hotline_offer_records(self, mocked_search, mocked_cache):
-        mocked_search.return_value = [
-            self._offer("238947", "Gamepad F310", "1355.00"),
-            self._offer("238959", "Wireless Gamepad F710", "2148.00"),
-        ]
-
-        ingest_hotline_search(self.job.id)
-
-        self.job.refresh_from_db()
-        self.assertEqual(self.job.status, SearchIngestionJob.STATUS_COMPLETED)
-        self.assertEqual(self.job.result_count, 2)
-        self.assertEqual(self.job.gift_count, 2)
-
-        hotline_shop = Shop.objects.get(slug="hotline")
-        self.assertEqual(hotline_shop.name, "Hotline")
-
-        links = ProductLink.objects.filter(shop=hotline_shop).order_by("external_offer_id")
-        self.assertEqual(links.count(), 2)
-        self.assertEqual(links.first().external_product_id, "238947")
-        self.assertTrue(self.job.gifts.filter(id=self.active_gift.id).exists())
-
-        new_gift = Gift.objects.get(name="Wireless Gamepad F710")
-        self.assertFalse(new_gift.is_active)
-        self.assertEqual(
-            PriceHistory.objects.filter(product_link__shop=hotline_shop).count(),
-            2,
-        )
-        mocked_cache.assert_called()
-
-    @patch("shops.tasks.update_gift_price_cache.delay")
-    @patch("search.tasks.HotlineAdapter.search")
-    def test_ingestion_handles_empty_results(self, mocked_search, mocked_cache):
-        mocked_search.return_value = []
-
-        ingest_hotline_search(self.job.id)
-
-        self.job.refresh_from_db()
-        self.assertEqual(self.job.status, SearchIngestionJob.STATUS_COMPLETED)
-        self.assertEqual(self.job.result_count, 0)
-        self.assertEqual(self.job.gift_count, 0)
-        self.assertEqual(self.job.gifts.count(), 0)
-        mocked_cache.assert_not_called()
-
-    @patch("shops.tasks.update_gift_price_cache.delay")
-    @patch("search.tasks.HotlineAdapter.search")
-    def test_ingestion_deduplicates_repeated_runs(self, mocked_search, mocked_cache):
-        mocked_search.return_value = [self._offer("238947", "Gamepad F310", "1355.00")]
-
-        ingest_hotline_search(self.job.id)
-        ingest_hotline_search(self.job.id)
-
-        hotline_shop = Shop.objects.get(slug="hotline")
-        self.assertEqual(
-            ProductLink.objects.filter(shop=hotline_shop, external_offer_id="hotline-product-238947").count(),
-            1,
-        )
-
-    @patch("search.tasks.HotlineAdapter.search")
-    def test_ingestion_marks_failed_without_dropping_existing_gifts(self, mocked_search):
-        self.job.gifts.add(self.active_gift)
-        mocked_search.side_effect = RuntimeError("parser failure")
-
-        with self.assertRaises(RuntimeError):
-            ingest_hotline_search(self.job.id)
-
-        self.job.refresh_from_db()
-        self.assertEqual(self.job.status, SearchIngestionJob.STATUS_FAILED)
-        self.assertEqual(self.job.gifts.count(), 1)
-        self.assertIn("parser failure", self.job.last_error)
 
 
 class HotlineProductOfferParserTestCase(TestCase):

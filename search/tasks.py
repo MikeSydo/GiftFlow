@@ -3,26 +3,21 @@ from __future__ import annotations
 import logging
 
 from celery import shared_task
-from django.utils import timezone
 
 from gifts.models import Gift
 
 from .hotline import HotlineAdapter
-from .models import IngestionRun, SearchIngestionJob
+from .models import IngestionRun
 from .seeds import HOTLINE_SEEDS, get_hotline_seed
 from .services import (
     create_ingestion_run,
     get_active_ingestion_run,
-    get_hotline_shop,
     get_stale_hotline_gifts,
     mark_ingestion_run_completed,
     mark_ingestion_run_failed,
     mark_ingestion_run_running,
-    match_or_create_gift,
-    refresh_gift_price_cache,
     sync_hotline_product_offers,
     upsert_hotline_gift_from_summary,
-    upsert_hotline_offer,
 )
 
 logger = logging.getLogger("search.tasks")
@@ -152,82 +147,6 @@ def refresh_hotline_product(run_id: int) -> None:
             "[hotline] product refresh failed gift=%s source_product_id=%s: %s",
             gift.id if gift else None,
             run.source_product_id,
-            exc,
-        )
-        raise
-
-
-@shared_task(queue="discovery", rate_limit="12/m")
-def ingest_hotline_search(job_id: int) -> None:
-    job = SearchIngestionJob.objects.get(id=job_id)
-    job.status = SearchIngestionJob.STATUS_RUNNING
-    job.started_at = timezone.now()
-    job.last_error = ""
-    job.save(update_fields=["status", "started_at", "last_error", "updated_at"])
-
-    try:
-        with HotlineAdapter() as adapter:
-            offers = adapter.search(job.query, filters=job.request_filters)
-
-        shop = get_hotline_shop()
-        unique_gift_ids: set[int] = set()
-        touched_gift_ids: set[int] = set()
-
-        for offer in offers:
-            gift = match_or_create_gift(
-                title=offer.title,
-                price=offer.price,
-                image_url=offer.image_url,
-            )
-            _, created = upsert_hotline_offer(shop=shop, gift=gift, offer=offer)
-            unique_gift_ids.add(gift.id)
-            touched_gift_ids.add(gift.id)
-            logger.info(
-                "[hotline] %s offer=%s gift=%s",
-                "created" if created else "updated",
-                offer.external_offer_id,
-                gift.id,
-            )
-
-        for gift_id in touched_gift_ids:
-            refresh_gift_price_cache(gift_id)
-
-        job.gifts.set(sorted(unique_gift_ids))
-        job.status = SearchIngestionJob.STATUS_COMPLETED
-        job.result_count = len(offers)
-        job.gift_count = len(unique_gift_ids)
-        job.finished_at = timezone.now()
-        job.last_error = ""
-        job.save(
-            update_fields=[
-                "status",
-                "result_count",
-                "gift_count",
-                "finished_at",
-                "last_error",
-                "updated_at",
-            ],
-        )
-        shop.total_products = shop.productlinks.count()
-        shop.save(update_fields=["total_products", "updated_at"])
-        logger.info(
-            "[hotline] completed job=%d query=%s offers=%d gifts=%d",
-            job.id,
-            job.normalized_query,
-            len(offers),
-            len(unique_gift_ids),
-        )
-    except Exception as exc:
-        job.status = SearchIngestionJob.STATUS_FAILED
-        job.finished_at = timezone.now()
-        job.last_error = str(exc)
-        job.save(
-            update_fields=["status", "finished_at", "last_error", "updated_at"],
-        )
-        logger.exception(
-            "[hotline] failed job=%d query=%s: %s",
-            job.id,
-            job.normalized_query,
             exc,
         )
         raise

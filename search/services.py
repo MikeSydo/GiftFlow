@@ -5,22 +5,19 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db import transaction
 from django.db.models import Max, Min, OuterRef, Q, QuerySet, Subquery
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
-from rapidfuzz import fuzz
 
 from gifts.models import Category, Gift
 from shops.models import PriceHistory, ProductLink, Shop, normalize_product_url
 
-from .models import IngestionRun, SearchIngestionJob
+from .models import IngestionRun
 from .seeds import HotlineSeed
 
 logger = logging.getLogger("search.services")
 
-SEARCH_JOB_TTL = timedelta(hours=6)
 MAX_RESULTS = 20
 HOTLINE_CATALOG_SOURCE = Gift.CATALOG_SOURCE_HOTLINE
 
@@ -36,150 +33,6 @@ def extract_request_filters(data) -> dict:
         if value not in (None, ""):
             filters[key] = str(value)
     return filters
-
-
-def get_or_queue_hotline_job(query: str, request_filters: dict) -> SearchIngestionJob:
-    normalized_query = normalize_search_query(query)
-    if not normalized_query:
-        raise ValueError("Search query must not be empty")
-
-    now = timezone.now()
-    trimmed_query = re.sub(r"\s+", " ", query.strip())
-    should_enqueue = False
-
-    with transaction.atomic():
-        job, created = SearchIngestionJob.objects.select_for_update().get_or_create(
-            source=SearchIngestionJob.SOURCE_HOTLINE,
-            normalized_query=normalized_query,
-            defaults={
-                "query": trimmed_query,
-                "request_filters": request_filters,
-                "status": SearchIngestionJob.STATUS_PENDING,
-                "last_requested_at": now,
-                "queued_at": now,
-            },
-        )
-
-        if created:
-            should_enqueue = True
-        else:
-            update_fields = ["query", "request_filters", "last_requested_at"]
-            job.query = trimmed_query
-            job.request_filters = request_filters
-            job.last_requested_at = now
-
-            if job.status in (
-                SearchIngestionJob.STATUS_PENDING,
-                SearchIngestionJob.STATUS_RUNNING,
-            ):
-                job.save(update_fields=update_fields)
-            elif job.is_fresh(SEARCH_JOB_TTL):
-                job.save(update_fields=update_fields)
-            else:
-                job.status = SearchIngestionJob.STATUS_PENDING
-                job.last_error = ""
-                job.queued_at = now
-                job.started_at = None
-                job.finished_at = None
-                update_fields.extend(
-                    ["status", "last_error", "queued_at", "started_at", "finished_at"],
-                )
-                job.save(update_fields=update_fields)
-                should_enqueue = True
-
-    if should_enqueue:
-        from .tasks import ingest_hotline_search
-
-        ingest_hotline_search.delay(job.id)
-
-    return job
-
-
-def get_hotline_shop() -> Shop:
-    shop, _ = Shop.objects.get_or_create(
-        slug="hotline",
-        defaults={
-            "name": "Hotline",
-            "website": "https://hotline.ua",
-            "shop_type": "marketplace",
-            "specialization": "Aggregator",
-            "priority": 100,
-            "is_active": True,
-        },
-    )
-    return shop
-
-
-def match_or_create_gift(title: str, price: Decimal, image_url: str | None = None) -> Gift:
-    exact_match = Gift.objects.filter(name__iexact=title).first()
-    if exact_match is not None:
-        return exact_match
-
-    best_gift = None
-    best_score = 0.0
-    for gift in Gift.objects.filter(is_active=True).only("id", "name"):
-        score = fuzz.token_sort_ratio(title, gift.name)
-        if score > best_score:
-            best_score = score
-            best_gift = gift
-
-    if best_gift is not None and best_score >= 85:
-        return best_gift
-
-    unique_name = build_unique_gift_name(title)
-    slug = build_unique_gift_slug(unique_name)
-    gift = Gift.objects.create(
-        name=unique_name,
-        slug=slug,
-        is_active=False,
-        min_price=price,
-        max_price=price,
-        image_url=(image_url or "")[:1000] or None,
-    )
-    logger.info("[hotline] created inactive gift id=%d name=%s", gift.id, gift.name)
-    return gift
-
-
-def upsert_hotline_offer(shop: Shop, gift: Gift, offer) -> tuple[ProductLink, bool]:
-    normalized_url = normalize_product_url(offer.product_url)
-    now = timezone.now()
-
-    link, created = ProductLink.objects.update_or_create(
-        shop=shop,
-        external_offer_id=offer.external_offer_id,
-        defaults={
-            "gift": gift,
-            "product_url": offer.product_url,
-            "normalized_product_url": normalized_url,
-            "product_name": offer.title[:300],
-            "price": offer.price,
-            "original_price": offer.original_price,
-            "in_stock": True,
-            "image_url": (offer.image_url or "")[:1000] or None,
-            "last_checked": now,
-            "last_price_update": now,
-            "external_product_id": offer.external_product_id,
-            "seller_name": (offer.seller_name or "")[:200] or None,
-            "seller_url": offer.seller_url,
-            "is_marketplace_offer": False,
-            "original_category_name": (offer.category_hint or "")[:300],
-        },
-    )
-
-    latest_snapshot = (
-        PriceHistory.objects.filter(product_link=link)
-        .order_by("-recorded_at")
-        .values("price", "in_stock")
-        .first()
-    )
-    if created or latest_snapshot != {"price": offer.price, "in_stock": True}:
-        PriceHistory.objects.create(
-            product_link=link,
-            price=offer.price,
-            in_stock=True,
-        )
-
-    return link, created
 
 
 def refresh_gift_price_cache(gift_id: int) -> None:

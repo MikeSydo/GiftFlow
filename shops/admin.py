@@ -15,6 +15,10 @@ class ShopSourceInline(admin.TabularInline):
     model = ShopSource
     extra = 0
     fields = ("discovery_mode", "source_type", "value", "priority", "is_active")
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Shop)
@@ -27,22 +31,6 @@ class ShopAdmin(admin.ModelAdmin):
     search_fields = ["name", "website"]
     prepopulated_fields = {"slug": ("name",)}
     list_editable = ["priority", "is_active"]
-    actions = ["trigger_discovery"]
-
-    @admin.action(description="Run discovery for selected shops")
-    def trigger_discovery(self, request, queryset):
-        from .tasks import discover_source_products
-
-        source_ids = list(
-            ShopSource.objects.filter(
-                integration__shop__in=queryset,
-                integration__is_active=True,
-                is_active=True,
-            ).values_list("id", flat=True)
-        )
-        for source_id in source_ids:
-            discover_source_products.delay(source_id)
-        self.message_user(request, f"Discovery started for {len(source_ids)} sources")
 
 
 @admin.register(ShopIntegration)
@@ -54,7 +42,17 @@ class ShopIntegrationAdmin(admin.ModelAdmin):
     search_fields = ["shop__name", "base_url"]
     list_editable = ["priority", "is_active"]
     raw_id_fields = ["shop"]
-    inlines = [ShopSourceInline]
+    readonly_fields = [
+        "shop", "connector_type", "base_url", "auth_type", "auth_config",
+        "request_config", "field_mapping", "is_active", "priority",
+        "created_at", "updated_at",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ShopSource)
@@ -66,30 +64,31 @@ class ShopSourceAdmin(admin.ModelAdmin):
     search_fields = ["integration__shop__name", "value"]
     list_editable = ["priority", "is_active"]
     raw_id_fields = ["integration"]
+    readonly_fields = [
+        "integration", "discovery_mode", "source_type", "value", "config",
+        "priority", "is_active", "created_at", "updated_at",
+    ]
     fieldsets = (
         (
-            None,
+            "Legacy source configuration",
             {
                 "fields": (
                     "integration", "discovery_mode", "source_type", "value", "config",
                     "priority", "is_active",
                 ),
                 "description": (
-                    "Query-first sources usually use discovery mode query_seed/category_seed with "
-                    "seed keywords, category hints, search templates and limits in config."
+                    "Legacy only. Active catalog ingestion is scheduled through Hotline seeds and "
+                    "does not read ShopSource records."
                 ),
             },
         ),
     )
-    actions = ["trigger_discovery"]
 
-    @admin.action(description="Run discovery for selected sources")
-    def trigger_discovery(self, request, queryset):
-        from .tasks import discover_source_products
+    def has_add_permission(self, request):
+        return False
 
-        for source in queryset:
-            discover_source_products.delay(source.id)
-        self.message_user(request, f"Discovery started for {queryset.count()} sources")
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ShopCategoryAlias)

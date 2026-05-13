@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from .connectors.base import BaseConnector
 from .filters import ProductLinkFilter
-from .models import PriceHistory, ProductLink, Shop, ShopClick, ShopSource
+from .models import PriceHistory, ProductLink, Shop, ShopClick
 from .serializers import PriceHistorySerializer, ProductLinkSerializer, ShopSerializer
 
 
@@ -181,42 +181,3 @@ class ScraperStatusView(APIView):
                 "errors_count": 0,
             })
         return Response(result)
-
-
-class TriggerDiscoveryView(APIView):
-    permission_classes = [IsAdminUser]
-
-    def post(self, request, shop_slug):
-        try:
-            shop = Shop.objects.get(slug=shop_slug, is_active=True)
-        except Shop.DoesNotExist:
-            return Response(
-                {"detail": f'Shop "{shop_slug}" not found.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        sources = list(
-            ShopSource.objects.filter(
-                integration__shop=shop,
-                integration__is_active=True,
-                is_active=True,
-            ).values_list("id", flat=True)
-        )
-        if not sources:
-            return Response(
-                {"detail": f'No active sources for shop "{shop_slug}".'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        from .tasks import discover_source_products
-
-        task_ids = []
-        for source_id in sources:
-            result = discover_source_products.delay(source_id)
-            task_ids.append(result.id)
-
-        return Response({
-            "shop": shop.slug,
-            "task_ids": task_ids,
-            "sources_queued": len(task_ids),
-        }, status=status.HTTP_202_ACCEPTED)

@@ -18,5 +18,4 @@ urlpatterns = [
     # Analytics (staff)
     path('analytics/', views.AnalyticsView.as_view(), name='analytics'),
     path('scraper-status/', views.ScraperStatusView.as_view(), name='scraper-status'),
-    path('trigger-discovery/<slug:shop_slug>/', views.TriggerDiscoveryView.as_view(), name='trigger-discovery'),
 ]
