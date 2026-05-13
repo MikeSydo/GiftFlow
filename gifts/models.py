@@ -60,6 +60,11 @@ class Tag(models.Model):
         super().save(*args, **kwargs)
 
 class Gift(models.Model):
+    CATALOG_SOURCE_HOTLINE = "hotline"
+    CATALOG_SOURCE_CHOICES = [
+        (CATALOG_SOURCE_HOTLINE, "Hotline"),
+    ]
+
     GENDER_TYPES = [
         ("M", "Male"),
         ("F", "Female"),
@@ -86,6 +91,24 @@ class Gift(models.Model):
     popularity_score = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True, verbose_name="Active")
     is_featured = models.BooleanField(default=False, verbose_name="Featured")
+    catalog_source = models.CharField(
+        max_length=20,
+        choices=CATALOG_SOURCE_CHOICES,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    source_product_id = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    source_product_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -100,11 +123,20 @@ class Gift(models.Model):
             models.Index(fields=['min_price', 'max_price']),
             models.Index(fields=['-popularity_score', '-created_at']),
             models.Index(fields=['is_active', 'is_featured']),
+            models.Index(
+                fields=['catalog_source', 'source_product_id'],
+                name='gifts_gift_catalog_83bc5e_idx',
+            ),
         ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(age_min__lte=models.F('age_max')),
                 name='age_min_lte_age_max'
+            ),
+            models.UniqueConstraint(
+                fields=['catalog_source', 'source_product_id'],
+                condition=~models.Q(catalog_source="") & ~models.Q(source_product_id=""),
+                name='unique_catalog_source_product_id',
             ),
         ]
 

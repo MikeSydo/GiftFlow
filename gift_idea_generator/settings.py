@@ -10,13 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+from datetime import timedelta
 import os
 from pathlib import Path
-from datetime import timedelta
 from urllib.parse import quote
 
 import dj_database_url
-from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -205,17 +204,14 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
 CELERY_BEAT_SCHEDULE = {
-    'discover-all-shops': {
-        'task': 'shops.tasks.trigger_all_shop_discovery',
-        'schedule': crontab(hour='*/6'),
+    "hotline-seed-refresh": {
+        "task": "search.tasks.enqueue_hotline_seed_refreshes",
+        "schedule": timedelta(hours=6),
     },
-    'update-all-prices': {
-        'task': 'shops.tasks.trigger_all_price_updates',
-        'schedule': crontab(hour='*/2'),
-    },
-    'verify-all-links': {
-        'task': 'shops.tasks.trigger_all_verifications',
-        'schedule': crontab(hour=3, minute=0),
+    "hotline-stale-product-refresh": {
+        "task": "search.tasks.enqueue_stale_hotline_product_refreshes",
+        "schedule": timedelta(hours=1),
+        "args": (100,),
     },
 }
 
@@ -250,6 +246,21 @@ LOGGING = {
             'propagate': False,
         },
         'shops.tasks': {
+            'handlers': ['console', 'scraper_file'],
+            'level': DJANGO_LOG_LEVEL,
+            'propagate': False,
+        },
+        'search.hotline': {
+            'handlers': ['console', 'scraper_file'],
+            'level': DJANGO_LOG_LEVEL,
+            'propagate': False,
+        },
+        'search.services': {
+            'handlers': ['console', 'scraper_file'],
+            'level': DJANGO_LOG_LEVEL,
+            'propagate': False,
+        },
+        'search.tasks': {
             'handlers': ['console', 'scraper_file'],
             'level': DJANGO_LOG_LEVEL,
             'propagate': False,
