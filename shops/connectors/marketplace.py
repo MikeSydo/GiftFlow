@@ -120,40 +120,6 @@ class MarketplaceTemplateConnector(BaseConnector):
             page = context.new_page()
             page.goto(url, timeout=30000, wait_until="networkidle")
             page.wait_for_timeout(3000)
-            page_title = page.title()
-            current_url = page.url
-            debug_meta = page.evaluate(r"""() => {
-                const hrefs = Array.from(document.querySelectorAll("a[href]"))
-                    .map((link) => link.href)
-                    .filter(Boolean);
-                const productLike = hrefs.filter((href) => href.includes("/p"));
-                const regexSamples = productLike.slice(0, 10).map((href) => ({
-                    href,
-                    regexMatch: href.match(/\/p(\d+)\//)?.[1] || null,
-                }));
-                const text = document.body ? document.body.innerText.slice(0, 1000) : "";
-                return {
-                    totalLinks: hrefs.length,
-                    sampleLinks: hrefs.slice(0, 10),
-                    productLikeLinks: productLike.length,
-                    sampleProductLikeLinks: productLike.slice(0, 5),
-                    regexSamples,
-                    hasNoResultsText: /нічого не знайдено|нічого не найдено|no results/i.test(text),
-                    hasCaptchaText: /captcha|підтвердіть, що ви не робот|i am not a robot/i.test(text),
-                };
-            }""")
-            logger.info(
-                "[rozetka-debug] page=%s title=%s total_links=%s sample_links=%s product_like_links=%s no_results=%s captcha=%s sample_product_links=%s regex_samples=%s",
-                current_url,
-                page_title,
-                debug_meta.get("totalLinks"),
-                debug_meta.get("sampleLinks"),
-                debug_meta.get("productLikeLinks"),
-                debug_meta.get("hasNoResultsText"),
-                debug_meta.get("hasCaptchaText"),
-                debug_meta.get("sampleProductLikeLinks"),
-                debug_meta.get("regexSamples"),
-            )
             product_ids = page.evaluate(r"""() => {
                 const links = document.querySelectorAll('a[href*="/p"]');
                 const ids = [];
@@ -165,12 +131,6 @@ class MarketplaceTemplateConnector(BaseConnector):
                 }
                 return ids;
             }""")
-            logger.info(
-                "[rozetka-debug] resolved %d product ids for %s sample_ids=%s",
-                len(product_ids),
-                current_url,
-                product_ids[:10],
-            )
 
             all_products = []
             for index in range(0, len(product_ids), api_batch_size):
@@ -193,19 +153,7 @@ class MarketplaceTemplateConnector(BaseConnector):
                     batch_url,
                 )
                 if "error" in result:
-                    logger.warning(
-                        "[rozetka-debug] batch request failed for %s ids=%s error=%s",
-                        current_url,
-                        ids_str,
-                        result["error"],
-                    )
                     continue
-                logger.info(
-                    "[rozetka-debug] batch request returned %d product records for %s ids=%s",
-                    len(result.get("data", [])),
-                    current_url,
-                    ids_str,
-                )
                 all_products.extend(result.get("data", []))
 
             browser.close()
