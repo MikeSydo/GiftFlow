@@ -477,6 +477,10 @@ class HotlineProductOfferParserTestCase(TestCase):
 
 class HotlineProductRefreshTaskTestCase(TestCase):
     def setUp(self):
+        self.cache_delay_patcher = patch("shops.tasks.update_gift_price_cache.delay")
+        self.cache_delay_mock = self.cache_delay_patcher.start()
+        self.addCleanup(self.cache_delay_patcher.stop)
+
         self.category = Category.objects.create(
             name="Gaming",
             slug="gaming",
@@ -558,6 +562,7 @@ class HotlineProductRefreshTaskTestCase(TestCase):
             source_product_id=self.gift.source_product_id,
         )
 
+        self.cache_delay_mock.reset_mock()
         refresh_hotline_product(run.id)
 
         run.refresh_from_db()
@@ -584,3 +589,18 @@ class HotlineProductRefreshTaskTestCase(TestCase):
         self.gift.refresh_from_db()
         self.assertEqual(self.gift.min_price, Decimal("19499.00"))
         self.assertEqual(self.gift.max_price, Decimal("20599.00"))
+        self.cache_delay_mock.assert_not_called()
+
+    def test_product_link_save_still_queues_price_cache_update(self):
+        self.cache_delay_mock.reset_mock()
+
+        ProductLink.objects.create(
+            gift=self.gift,
+            shop=self.stale_shop,
+            product_url="https://example.com/standalone-offer",
+            product_name="Standalone Offer",
+            price=Decimal("19999.00"),
+            in_stock=True,
+        )
+
+        self.cache_delay_mock.assert_called_once_with(self.gift.id)
