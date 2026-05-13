@@ -1,6 +1,9 @@
-from django.shortcuts import render
 from django.http import JsonResponse
-from gifts.models import Gift, Category, Tag
+from django.shortcuts import render
+
+from gifts.models import Category, Tag
+
+from .services import apply_gift_filters, base_gift_queryset, serialize_gift_results
 
 
 def gift_search(request):
@@ -8,7 +11,7 @@ def gift_search(request):
     Gift search page:
     Step 1: category
     Step 2: occasion tags
-    Step 3: people params (gender, age, budget)
+    Step 3: people params
     Step 4: results
     """
 
@@ -37,69 +40,16 @@ def gift_search(request):
 
 
 def search_gifts_api(request):
-    """
-    AJAX-endpoint for gifts filtering.
-    """
+    """Synchronous DB-backed gift search."""
 
     if request.method != "GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    qs = Gift.objects.filter(is_active=True).select_related("category").prefetch_related(
-        "tags"
+    qs = apply_gift_filters(base_gift_queryset(), request.GET)
+    results, count = serialize_gift_results(qs)
+    return JsonResponse(
+        {
+            "results": results,
+            "count": count,
+        },
     )
-
-    # Filters
-    category_id = request.GET.get("category")
-    if category_id and category_id.isdigit():
-        qs = qs.filter(category_id=int(category_id))
-
-    gender = request.GET.get("gender")
-    if gender in ("M", "F"):
-        qs = qs.filter(gender__in=(gender, "U"))
-
-    age = request.GET.get("age")
-    if age and age.isdigit():
-        age = int(age)
-        qs = qs.filter(age_min__lte=age, age_max__gte=age)
-
-    budget_min = request.GET.get("budget_min")
-    budget_max = request.GET.get("budget_max")
-    if budget_min:
-        try:
-            budget_min_val = float(budget_min)
-            # Gift's min price should be >= user's min budget
-            qs = qs.filter(min_price__gte=budget_min_val)
-        except (ValueError, TypeError):
-            pass  # Ignore invalid input
-    if budget_max:
-        try:
-            budget_max_val = float(budget_max)
-            # Gift's min price should be <= user's max budget
-            qs = qs.filter(min_price__lte=budget_max_val)
-        except (ValueError, TypeError):
-            pass  # Ignore invalid input
-
-    tag_ids = request.GET.get("tags")
-    if tag_ids:
-        ids = [int(x) for x in tag_ids.split(",") if x.isdigit()]
-        if ids:
-            qs = qs.filter(tags__id__in=ids).distinct()
-
-    qs = qs.order_by("-popularity_score", "-created_at")[:20]
-
-    results = []
-    for gift in qs:
-        results.append(
-            {
-                "id": gift.id,
-                "title": gift.name,
-                "short_description": gift.short_description or "",
-                "image": gift.image.url if gift.image else "",
-                "category": gift.category.name if gift.category else "",
-                "min_price": str(gift.min_price or 0),
-                "popularity_score": gift.popularity_score,
-                "tags": [t.name for t in gift.tags.all()],
-            }
-        )
-
-    return JsonResponse({"results": results, "count": len(results)})

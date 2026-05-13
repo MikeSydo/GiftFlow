@@ -288,7 +288,7 @@
                         {% if gift.min_price %}
                         <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
                         {% endif %}
-                        <a href="#" class="gift-card__link">Переглянути →</a>
+                        <a href="{% url 'gifts:gift_detail' gift.slug %}" class="gift-card__link">Переглянути →</a>
                     </div>
                 </div>
             </article>
@@ -297,7 +297,7 @@
                 <span>🎁</span>
                 Подарунки для категорії "{{ category.name }}" ще не додані.<br>
                 <small style="font-size:.85rem;opacity:.7;margin-top:.5rem;display:block;">
-                    Запустіть Discovery в Адмінці або зачекайте наступного запуску Celery Beat.
+                    Зачекайте наступного планового Hotline refresh.
                 </small>
             </div>
             {% endfor %}

@@ -67,6 +67,16 @@
                     <p class="wizard-panel__sub">Оберіть область, яка найкраще описує ваш подарунок</p>
                 </div>
 
+                <div class="wizard-field">
+                    <label class="wizard-field__label" for="queryInput">Точний пошук (необов'язково)</label>
+                    <input
+                        type="text"
+                        id="queryInput"
+                        class="wizard-input"
+                        placeholder="gamepad, powerbank, lego"
+                        autocomplete="off" />
+                </div>
+
                 <div class="wizard-grid wizard-grid--categories" id="categoriesGrid">
                     {% for cat in categories %}
                     <button class="wizard-card" data-field="category" data-value="{{ cat.id }}">

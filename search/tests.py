@@ -1,7 +1,15 @@
 from django.test import TestCase, Client
 from django.urls import reverse
+from django.utils import timezone
 from decimal import Decimal
+from unittest.mock import patch
+
 from gifts.models import Gift, Category, Tag
+from shops.models import PriceHistory, ProductLink, Shop
+
+from .hotline import HotlineAdapter, HotlineMerchantOffer
+from .models import IngestionRun
+from .tasks import refresh_hotline_product
 
 
 class SearchGiftsAPITestCase(TestCase):
@@ -10,6 +18,9 @@ class SearchGiftsAPITestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.client = Client()
+        self.cache_delay_patcher = patch("shops.tasks.update_gift_price_cache.delay")
+        self.cache_delay_patcher.start()
+        self.addCleanup(self.cache_delay_patcher.stop)
 
         # Create categories
         self.category1 = Category.objects.create(
@@ -91,6 +102,51 @@ class SearchGiftsAPITestCase(TestCase):
             is_featured=False
         )
         self.gift3.tags.add(self.tag_birthday, self.tag_friend)
+
+        self.shop1 = Shop.objects.create(
+            name="Rozetka",
+            slug="rozetka",
+            website="https://rozetka.com.ua",
+            shop_type="marketplace",
+        )
+        self.shop2 = Shop.objects.create(
+            name="Yabluka",
+            slug="yabluka",
+            website="https://yabluka.ua",
+            shop_type="brand",
+        )
+
+        ProductLink.objects.create(
+            gift=self.gift1,
+            shop=self.shop1,
+            product_url="https://rozetka.com.ua/pad-1/",
+            product_name="Smartphone offer A",
+            price=Decimal("550.00"),
+            original_price=Decimal("600.00"),
+            in_stock=True,
+            seller_name="Seller A",
+            external_offer_id="offer-a",
+        )
+        ProductLink.objects.create(
+            gift=self.gift1,
+            shop=self.shop2,
+            product_url="https://yabluka.ua/pad-1/",
+            product_name="Smartphone offer B",
+            price=Decimal("530.00"),
+            in_stock=True,
+            seller_name="Yabluka",
+            external_offer_id="offer-b",
+        )
+        ProductLink.objects.create(
+            gift=self.gift2,
+            shop=self.shop1,
+            product_url="https://rozetka.com.ua/headphones-1/",
+            product_name="Headphones offer",
+            price=Decimal("120.00"),
+            in_stock=True,
+            seller_name="Seller C",
+            external_offer_id="offer-c",
+        )
 
         # Inactive gift (should not appear in results)
         self.gift4 = Gift.objects.create(
@@ -297,7 +353,19 @@ class SearchGiftsAPITestCase(TestCase):
             self.assertIn('min_price', gift)
             self.assertIn('popularity_score', gift)
             self.assertIn('tags', gift)
+            self.assertIn('best_offer', gift)
             self.assertIsInstance(gift['tags'], list)
+
+    def test_search_api_returns_best_offer(self):
+        response = self.client.get('/search/api/')
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        smartphone = next(item for item in data["results"] if item["title"] == "Smartphone")
+
+        self.assertIsNotNone(smartphone["best_offer"])
+        self.assertEqual(smartphone["best_offer"]["shop"], "Yabluka")
+        self.assertEqual(smartphone["best_offer"]["price"], "530.00")
 
     def test_search_api_method_not_allowed(self):
         """Test POST method returns error"""
@@ -354,3 +422,165 @@ class SearchGiftsAPITestCase(TestCase):
         titles = [gift['title'] for gift in data['results']]
 
         self.assertNotIn('Inactive Gift', titles)
+
+    def test_search_api_query_filters_local_results(self):
+        response = self.client.get('/search/api/', {'q': 'head'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(data['results'][0]['title'], 'Headphones')
+
+    def test_search_api_query_searches_tags_and_categories(self):
+        response = self.client.get('/search/api/', {'q': 'electronics'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['count'], 2)
+        titles = [gift['title'] for gift in data['results']]
+        self.assertIn('Smartphone', titles)
+        self.assertIn('Headphones', titles)
+
+    def test_search_api_returns_detail_url_for_gifts(self):
+        response = self.client.get('/search/api/', {'q': 'smart'})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(
+            data['results'][0]['detail_url'],
+            reverse('gifts:gift_detail', args=[self.gift1.slug]),
+        )
+
+
+class HotlineProductOfferParserTestCase(TestCase):
+    def test_parse_product_html_extracts_merchant_offers_and_old_price(self):
+        html = """
+        <script>
+        window.__NUXT__={offers:{edges:[
+            {node:{_id:"101",conversionUrl:"\\u002Fgo\\u002Fprice\\u002F101\\u002F",descriptionShort:"Steam Deck 256 GB",firmId:77,firmTitle:"GRO",firmExtraInfo:{website:"gro.ua"},price:19499,visible:true}},
+            {node:{_id:"102",conversionUrl:"\\u002Fgo\\u002Fprice\\u002F102\\u002F",descriptionFull:"Steam Deck 256 GB",firmId:78,firmTitle:"UPPS.UA",firmExtraInfo:{website:"upps.ua"},price:20599,visible:true}}
+        ],pageInfo:{}},sales:{sales:{"101":{oldPrice:21395}}}};
+        </script>
+        """
+
+        adapter = HotlineAdapter()
+        offers = adapter._parse_product_html(html, external_product_id="21916104")
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].external_offer_id, "101")
+        self.assertEqual(offers[0].seller_name, "GRO")
+        self.assertEqual(offers[0].seller_url, "https://gro.ua")
+        self.assertEqual(offers[0].original_price, Decimal("21395"))
+        self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
+
+
+class HotlineProductRefreshTaskTestCase(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(
+            name="Gaming",
+            slug="gaming",
+            is_active=True,
+        )
+        self.gift = Gift.objects.create(
+            name="Steam Deck 256 GB",
+            slug="steam-deck-256-gb",
+            category=self.category,
+            gender="U",
+            age_min=0,
+            age_max=100,
+            min_price=Decimal("20000.00"),
+            max_price=Decimal("22000.00"),
+            popularity_score=10,
+            is_active=True,
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+            source_product_id="21916104",
+            source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
+        )
+        self.stale_shop = Shop.objects.create(
+            name="Old Shop",
+            slug="old-shop",
+            website="https://old-shop.example",
+            shop_type="specialized",
+        )
+        self.stale_link = ProductLink.objects.create(
+            gift=self.gift,
+            shop=self.stale_shop,
+            product_url="https://hotline.ua/go/price/999/",
+            product_name="Steam Deck 256 GB",
+            price=Decimal("21500.00"),
+            original_price=Decimal("22000.00"),
+            in_stock=True,
+            last_checked=timezone.now(),
+            last_price_update=timezone.now(),
+            external_offer_id="999",
+            external_product_id="21916104",
+            seller_name="Old Shop",
+            seller_url="https://old-shop.example",
+            is_marketplace_offer=True,
+        )
+        PriceHistory.objects.create(
+            product_link=self.stale_link,
+            price=Decimal("21500.00"),
+            in_stock=True,
+        )
+
+    @staticmethod
+    def _merchant_offer(
+        offer_id: str,
+        seller_name: str,
+        website: str,
+        price: str,
+        old_price: str | None = None,
+    ) -> HotlineMerchantOffer:
+        return HotlineMerchantOffer(
+            external_product_id="21916104",
+            external_offer_id=offer_id,
+            title="Steam Deck 256 GB",
+            product_url=f"https://hotline.ua/go/price/{offer_id}/",
+            price=Decimal(price),
+            original_price=Decimal(old_price) if old_price else None,
+            seller_name=seller_name,
+            seller_external_id=f"seller-{offer_id}",
+            seller_url=f"https://{website}",
+        )
+
+    @patch("search.tasks.HotlineAdapter.fetch_product_offers")
+    def test_refresh_hotline_product_creates_merchants_and_marks_missing_offers_stale(self, mocked_fetch):
+        mocked_fetch.return_value = [
+            self._merchant_offer("101", "GRO", "gro.ua", "19499", "21395"),
+            self._merchant_offer("102", "UPPS.UA", "upps.ua", "20599"),
+        ]
+
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
+            gift=self.gift,
+            source_product_id=self.gift.source_product_id,
+        )
+
+        refresh_hotline_product(run.id)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, IngestionRun.STATUS_COMPLETED)
+        self.assertEqual(run.discovered_count, 2)
+
+        offers = ProductLink.objects.filter(gift=self.gift).order_by("external_offer_id")
+        self.assertEqual(offers.count(), 3)
+
+        gro_offer = offers.get(external_offer_id="101")
+        self.assertEqual(gro_offer.shop.name, "GRO")
+        self.assertEqual(gro_offer.price, Decimal("19499"))
+        self.assertEqual(gro_offer.original_price, Decimal("21395"))
+        self.assertTrue(gro_offer.in_stock)
+        self.assertTrue(gro_offer.is_marketplace_offer)
+
+        self.stale_link.refresh_from_db()
+        self.assertFalse(self.stale_link.in_stock)
+        self.assertEqual(
+            PriceHistory.objects.filter(product_link=self.stale_link).order_by("-recorded_at").first().in_stock,
+            False,
+        )
+
+        self.gift.refresh_from_db()
+        self.assertEqual(self.gift.min_price, Decimal("19499.00"))
+        self.assertEqual(self.gift.max_price, Decimal("20599.00"))

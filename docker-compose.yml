@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: gig_db
+    container_name: gift_flow_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5432:5432"
+      - "${DB_PORT}:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
       interval: 10s
@@ -18,9 +18,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: gig_redis
+    container_name: gift_flow_redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:6379"
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
@@ -29,7 +29,7 @@ services:
 
   web:
     build: .
-    container_name: gig_web
+    container_name: gift_flow_web
     command: >
       sh -c "sleep 10 &&
              python manage.py migrate &&
@@ -43,8 +43,17 @@ services:
     environment:
       - DEBUG=${DEBUG}
       - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - DJANGO_LOG_LEVEL=${DJANGO_LOG_LEVEL}
+      - SCRAPING_USER_AGENT=${SCRAPING_USER_AGENT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=${REDIS_DB}
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,15 +62,24 @@ services:
 
   celery_worker:
     build: .
-    container_name: gig_celery_worker
+    container_name: gift_flow_celery_worker
     command: celery -A gift_idea_generator worker -l info -Q discovery,prices,verification
     volumes:
       - .:/app
     environment:
       - DEBUG=${DEBUG}
       - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - DJANGO_LOG_LEVEL=${DJANGO_LOG_LEVEL}
+      - SCRAPING_USER_AGENT=${SCRAPING_USER_AGENT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=${REDIS_DB}
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,15 +88,24 @@ services:
 
   celery_beat:
     build: .
-    container_name: gig_celery_beat
+    container_name: gift_flow_celery_beat
     command: celery -A gift_idea_generator beat -l info
     volumes:
       - .:/app
     environment:
       - DEBUG=${DEBUG}
       - SECRET_KEY=${SECRET_KEY}
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - DJANGO_LOG_LEVEL=${DJANGO_LOG_LEVEL}
+      - SCRAPING_USER_AGENT=${SCRAPING_USER_AGENT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=${REDIS_DB}
     depends_on:
       postgres:
         condition: service_healthy
