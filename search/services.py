@@ -12,6 +12,7 @@ from django.utils.text import slugify
 
 from gifts.models import Category, Gift
 from shops.models import PriceHistory, ProductLink, Shop, normalize_product_url
+from shops.signals import suppress_productlink_price_cache_updates
 
 from .models import IngestionRun
 from .seeds import HotlineSeed
@@ -463,15 +464,17 @@ def sync_hotline_product_offers(gift: Gift, offers: list) -> dict[str, int]:
     touched_shop_ids: set[int] = set()
     updated_count = 0
 
-    for offer in offers:
-        shop = get_or_create_hotline_merchant_shop(offer)
-        touched_shop_ids.add(shop.id)
-        active_offer_ids.add(offer.external_offer_id)
-        _, _, changed = upsert_hotline_merchant_offer(gift=gift, shop=shop, offer=offer)
-        if changed:
-            updated_count += 1
+    with suppress_productlink_price_cache_updates():
+        for offer in offers:
+            shop = get_or_create_hotline_merchant_shop(offer)
+            touched_shop_ids.add(shop.id)
+            active_offer_ids.add(offer.external_offer_id)
+            _, _, changed = upsert_hotline_merchant_offer(gift=gift, shop=shop, offer=offer)
+            if changed:
+                updated_count += 1
 
-    stale_count = mark_missing_hotline_offers_inactive(gift, active_offer_ids)
+        stale_count = mark_missing_hotline_offers_inactive(gift, active_offer_ids)
+
     refresh_shop_product_counts(touched_shop_ids)
     refresh_gift_price_cache(gift.id)
     return {
