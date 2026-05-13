@@ -202,6 +202,22 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_ROUTES = {
+    'search.tasks.enqueue_hotline_seed_refreshes': {'queue': 'discovery'},
+    'search.tasks.enqueue_stale_hotline_product_refreshes': {'queue': 'prices'},
+    'search.tasks.refresh_hotline_seed': {'queue': 'discovery'},
+    'search.tasks.refresh_hotline_product': {'queue': 'prices'},
+    'shops.tasks.discover_source_products': {'queue': 'discovery'},
+    'shops.tasks.discover_shop_products': {'queue': 'discovery'},
+    'shops.tasks.process_discovered_product': {'queue': 'discovery'},
+    'shops.tasks.update_product_price': {'queue': 'prices'},
+    'shops.tasks.update_gift_price_cache': {'queue': 'prices'},
+    'shops.tasks.verify_product_link': {'queue': 'verification'},
+    'shops.tasks.increment_shop_click': {'queue': 'prices'},
+    'shops.tasks.trigger_all_shop_discovery': {'queue': 'discovery'},
+    'shops.tasks.trigger_all_price_updates': {'queue': 'prices'},
+    'shops.tasks.trigger_all_verifications': {'queue': 'verification'},
+}
 
 CELERY_BEAT_SCHEDULE = {
     "hotline-seed-refresh": {
