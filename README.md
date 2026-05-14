@@ -129,3 +129,30 @@ This command only enqueues seed refresh tasks. The worker then:
 - the gift detail page shows sorted merchant offers and outbound shop links
 
 If the catalog is empty, run the bootstrap command and wait for the worker to finish the first ingestion cycle.
+
+## Dev readiness checklist
+
+Before planning deployment, verify the full development flow from an empty or
+refreshed local database:
+
+1. Start Postgres and Redis.
+2. Apply migrations.
+3. Seed the default gift categories.
+4. Start Django, the Celery worker, and Celery beat.
+5. Queue the initial Hotline catalog bootstrap.
+6. Confirm that `IngestionRun` records move to `completed` in Django admin.
+7. Confirm that `/search/` loads categories and returns DB-backed results.
+8. Confirm that `/search/api/` returns gifts with `detail_url` and `best_offer`.
+9. Open a `/gifts/<slug>/` page and confirm merchant offers are sorted by live cheapest price first.
+10. Click an offer and confirm the `/api/shops/products/<id>/click/` endpoint records a `ShopClick`.
+
+Useful commands:
+
+```powershell
+python manage.py migrate
+python manage.py seed_gift_categories
+python manage.py bootstrap_hotline_catalog
+```
+
+Keep deploy work separate from this checklist. Deployment can start after the
+checks above pass and the test commands in the verification section are green.
