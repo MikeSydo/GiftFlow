@@ -1,15 +1,17 @@
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from django.contrib import admin
 from django.core.management import call_command
 from decimal import Decimal
 
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from gifts.admin import GiftAdmin
-from gifts.models import Category, Gift
+from gifts.models import Category, Gift, GiftImage
 from shops.models import ProductLink, Shop
 
 
@@ -28,8 +30,134 @@ class SeedGiftCategoriesCommandTestCase(TestCase):
         self.assertTrue(Category.objects.filter(slug="home-kitchen").exists())
 
 
+class CopyMediaToStorageCommandTestCase(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(
+            name="Media",
+            slug="media",
+            is_active=True,
+        )
+        self.gift = Gift.objects.create(
+            name="Gift With Image",
+            slug="gift-with-image",
+            category=self.category,
+            gender="U",
+            age_min=0,
+            age_max=100,
+            image="gifts/example.jpg",
+        )
+        self.shop = Shop.objects.create(
+            name="Shop With Logo",
+            slug="shop-with-logo",
+            website="https://shop.example",
+            shop_type="specialized",
+            logo="shops/static/images/logo.png",
+        )
+        self.gallery_image = GiftImage.objects.create(
+            gift=self.gift,
+            image="gifts/gallery/detail.jpg",
+        )
+
+    @staticmethod
+    def _storage_settings(destination_root):
+        return {
+            "default": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {
+                    "location": destination_root,
+                    "base_url": "/uploaded-media/",
+                },
+            },
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            },
+        }
+
+    @staticmethod
+    def _write_file(root, name, content=b"image-bytes"):
+        path = Path(root) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
+
+    def test_copy_media_to_storage_dry_run_does_not_copy_files(self):
+        with TemporaryDirectory() as source_root, TemporaryDirectory() as destination_root:
+            self._write_file(source_root, self.gift.image.name)
+
+            with override_settings(
+                MEDIA_ROOT=source_root,
+                STORAGES=self._storage_settings(destination_root),
+            ):
+                output = StringIO()
+                call_command("copy_media_to_storage", "--dry-run", stdout=output)
+
+            self.assertIn("would_copy=1", output.getvalue())
+            self.assertFalse((Path(destination_root) / self.gift.image.name).exists())
+
+    def test_copy_media_to_storage_copies_existing_local_files(self):
+        with TemporaryDirectory() as source_root, TemporaryDirectory() as destination_root:
+            self._write_file(source_root, self.gift.image.name, b"gift")
+            self._write_file(source_root, self.shop.logo.name, b"logo")
+            self._write_file(source_root, self.gallery_image.image.name, b"gallery")
+
+            with override_settings(
+                MEDIA_ROOT=source_root,
+                STORAGES=self._storage_settings(destination_root),
+            ):
+                output = StringIO()
+                call_command("copy_media_to_storage", stdout=output)
+
+            self.assertIn("copied=3", output.getvalue())
+            self.assertEqual(
+                (Path(destination_root) / self.gift.image.name).read_bytes(),
+                b"gift",
+            )
+            self.assertEqual(
+                (Path(destination_root) / self.shop.logo.name).read_bytes(),
+                b"logo",
+            )
+            self.assertEqual(
+                (Path(destination_root) / self.gallery_image.image.name).read_bytes(),
+                b"gallery",
+            )
+
+    def test_copy_media_to_storage_reports_missing_files(self):
+        with TemporaryDirectory() as source_root, TemporaryDirectory() as destination_root:
+            with override_settings(
+                MEDIA_ROOT=source_root,
+                STORAGES=self._storage_settings(destination_root),
+            ):
+                output = StringIO()
+                call_command("copy_media_to_storage", stdout=output)
+
+            self.assertIn("missing=3", output.getvalue())
+            self.assertFalse((Path(destination_root) / self.gift.image.name).exists())
+
+    def test_copy_media_to_storage_skips_empty_image_fields(self):
+        self.gift.image = ""
+        self.gift.save(update_fields=["image"])
+        self.shop.logo = ""
+        self.shop.save(update_fields=["logo"])
+        self.gallery_image.delete()
+
+        with TemporaryDirectory() as source_root, TemporaryDirectory() as destination_root:
+            with override_settings(
+                MEDIA_ROOT=source_root,
+                STORAGES=self._storage_settings(destination_root),
+            ):
+                output = StringIO()
+                call_command("copy_media_to_storage", stdout=output)
+
+            self.assertIn("copied=0", output.getvalue())
+            self.assertIn("missing=0", output.getvalue())
+
+
 class GiftDetailViewTestCase(TestCase):
     def setUp(self):
+        self.cache_delay_patcher = patch("shops.tasks.update_gift_price_cache.delay")
+        self.cache_delay_patcher.start()
+        self.addCleanup(self.cache_delay_patcher.stop)
+
         self.category = Category.objects.create(
             name="Gaming",
             slug="gaming",

@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -67,6 +68,10 @@ class CategoryMatcherAliasTestCase(TestCase):
 
 class ProductLinkClickViewTestCase(TestCase):
     def setUp(self):
+        self.cache_delay_patcher = patch("shops.tasks.update_gift_price_cache.delay")
+        self.cache_delay_patcher.start()
+        self.addCleanup(self.cache_delay_patcher.stop)
+
         self.category = Category.objects.create(name="Gaming", slug="gaming")
         self.gift = Gift.objects.create(
             name="Steam Deck Click",
