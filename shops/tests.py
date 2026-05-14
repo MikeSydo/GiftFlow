@@ -1,6 +1,5 @@
 import json
 from decimal import Decimal
-from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
@@ -94,8 +93,7 @@ class ProductLinkClickViewTestCase(TestCase):
             in_stock=True,
         )
 
-    @patch("shops.tasks.increment_shop_click.delay")
-    def test_click_endpoint_records_click_and_returns_affiliate_url(self, mocked_delay):
+    def test_click_endpoint_records_click_updates_counters_and_returns_affiliate_url(self):
         response = self.client.post(
             reverse("shops:productlink-click", args=[self.link.id]),
             data=json.dumps({"referrer": "https://giftflow.example/search/"}),
@@ -114,5 +112,9 @@ class ProductLinkClickViewTestCase(TestCase):
         click = ShopClick.objects.get(product_link=self.link)
         self.assertEqual(click.referrer, "https://giftflow.example/search/")
         self.assertEqual(click.user_agent, "GiftFlow Test Browser")
-        mocked_delay.assert_called_once_with(self.link.id)
+
+        self.link.refresh_from_db()
+        self.shop.refresh_from_db()
+        self.assertEqual(self.link.click_count, 1)
+        self.assertEqual(self.shop.click_count, 1)
 

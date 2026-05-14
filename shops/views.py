@@ -1,7 +1,7 @@
 from datetime import timedelta
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from django.db.models import BooleanField, Case, Exists, OuterRef, Value, When
+from django.db.models import BooleanField, Case, Exists, F, OuterRef, Value, When
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAdminUser
@@ -121,9 +121,12 @@ class ProductLinkClickView(APIView):
             referrer=request.data.get("referrer"),
         )
 
-        from .tasks import increment_shop_click
-
-        increment_shop_click.delay(link.id)
+        ProductLink.objects.filter(id=link.id).update(
+            click_count=F("click_count") + 1,
+        )
+        Shop.objects.filter(id=link.shop_id).update(
+            click_count=F("click_count") + 1,
+        )
 
         affiliate_url = link.product_url
         if link.shop.has_affiliate and link.shop.affiliate_parameter:
