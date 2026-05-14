@@ -1,7 +1,9 @@
 from django.contrib import admin
+from django.contrib import messages
 from django.utils.safestring import mark_safe
 
 from .models import Category, Tag, Gift, GiftImage
+from search.tasks import queue_hotline_product_refresh
 
 class GiftImageInline(admin.TabularInline):
     model = GiftImage
@@ -53,7 +55,7 @@ class GiftAdmin(admin.ModelAdmin):
     list_editable = ('is_active', 'is_featured')
     readonly_fields = ('created_at', 'updated_at')
     inlines = [GiftImageInline]
-    actions = ['make_active', 'make_inactive']
+    actions = ['make_active', 'make_inactive', 'refresh_hotline_offers']
 
     @admin.action(description='Make active')
     def make_active(self, request, queryset):
@@ -64,6 +66,29 @@ class GiftAdmin(admin.ModelAdmin):
     def make_inactive(self, request, queryset):
         count = queryset.update(is_active=False)
         self.message_user(request, f'{count} gifts made inactive.')
+
+    @admin.action(description='Refresh Hotline offers for selected gifts')
+    def refresh_hotline_offers(self, request, queryset):
+        queued = 0
+        skipped = 0
+        gifts = queryset.filter(
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+        ).exclude(
+            source_product_id="",
+        ).exclude(
+            source_product_url="",
+        )
+
+        for gift in gifts:
+            queue_hotline_product_refresh(gift)
+            queued += 1
+
+        skipped = queryset.count() - queued
+        self.message_user(
+            request,
+            f"Queued or reused offer refreshes for {queued} Hotline gift(s). Skipped {skipped}.",
+            messages.INFO,
+        )
 
     fieldsets = (
         ('Main Information', {
