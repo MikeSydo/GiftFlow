@@ -1,11 +1,14 @@
 from io import StringIO
+from unittest.mock import Mock, patch
 
+from django.contrib import admin
 from django.core.management import call_command
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
+from gifts.admin import GiftAdmin
 from gifts.models import Category, Gift
 from shops.models import ProductLink, Shop
 
@@ -97,3 +100,47 @@ class GiftDetailViewTestCase(TestCase):
             [offer.external_offer_id for offer in offers],
             ["1", "2", "3"],
         )
+
+    def test_gift_detail_uses_tracked_offer_click_urls(self):
+        response = self.client.get(reverse("gifts:gift_detail", args=[self.gift.slug]))
+        best_offer = ProductLink.objects.get(external_offer_id="1")
+
+        self.assertContains(response, "data-offer-click")
+        self.assertContains(
+            response,
+            reverse("shops:productlink-click", args=[best_offer.id]),
+        )
+
+
+class GiftAdminActionTestCase(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().post("/admin/gifts/gift/")
+        self.model_admin = GiftAdmin(Gift, admin.site)
+        self.model_admin.message_user = Mock()
+        self.hotline_gift = Gift.objects.create(
+            name="Hotline Gift",
+            slug="hotline-gift",
+            gender="U",
+            age_min=0,
+            age_max=100,
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+            source_product_id="21916104",
+            source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
+        )
+        self.manual_gift = Gift.objects.create(
+            name="Manual Gift",
+            slug="manual-gift",
+            gender="U",
+            age_min=0,
+            age_max=100,
+        )
+
+    @patch("gifts.admin.queue_hotline_product_refresh")
+    def test_refresh_hotline_offers_queues_only_hotline_gifts(self, mocked_queue):
+        self.model_admin.refresh_hotline_offers(
+            self.request,
+            Gift.objects.filter(id__in=[self.hotline_gift.id, self.manual_gift.id]),
+        )
+
+        mocked_queue.assert_called_once_with(self.hotline_gift)
+        self.model_admin.message_user.assert_called_once()

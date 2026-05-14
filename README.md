@@ -11,31 +11,62 @@ GiftFlow now runs with a single active ingestion architecture:
 
 ## Local setup
 
-### 1. Start infrastructure
+### 1. Use Python 3.12
+
+The Docker runtime uses `python:3.12-slim`, so local development should use
+Python 3.12 as well.
+
+Verify that Python 3.12 is installed:
 
 ```powershell
-docker compose up -d postgres redis
+py -3.12 --version
+```
+
+If the virtual environment was created with a stale interpreter path, delete it
+and recreate it:
+
+```powershell
+deactivate
+Remove-Item -Recurse -Force .\.venv
+py -3.12 -m venv .venv
 ```
 
 ### 2. Activate the virtual environment
 
 ```powershell
-.\.venv312\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe --version
 ```
 
-### 3. Apply migrations
+### 3. Install dependencies
+
+Always invoke pip through the active Python executable, especially after
+recreating the virtual environment:
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+### 4. Start infrastructure
+
+```powershell
+docker compose up -d postgres redis
+```
+
+### 5. Apply migrations
 
 ```powershell
 python manage.py migrate
 ```
 
-### 4. Start Django
+### 6. Start Django
 
 ```powershell
 python manage.py runserver
 ```
 
-### 5. Start the Celery worker
+### 7. Start the Celery worker
 
 On Windows use `-P solo` to avoid `billiard` pool failures.
 
@@ -43,10 +74,29 @@ On Windows use `-P solo` to avoid `billiard` pool failures.
 python -m celery -A gift_idea_generator worker -l info -Q discovery,prices,verification -P solo
 ```
 
-### 6. Start Celery beat
+### 8. Start Celery beat
 
 ```powershell
 python -m celery -A gift_idea_generator beat -l info
+```
+
+## Verification
+
+Run the local checks before committing development changes:
+
+```powershell
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test gifts search shops -v 1
+```
+
+If the local virtual environment is not available, run the same checks in the
+Docker web image:
+
+```powershell
+docker compose run --rm web python manage.py check
+docker compose run --rm web python manage.py makemigrations --check --dry-run
+docker compose run --rm web python manage.py test gifts search shops -v 1
 ```
 
 ## First catalog bootstrap
@@ -79,3 +129,30 @@ This command only enqueues seed refresh tasks. The worker then:
 - the gift detail page shows sorted merchant offers and outbound shop links
 
 If the catalog is empty, run the bootstrap command and wait for the worker to finish the first ingestion cycle.
+
+## Dev readiness checklist
+
+Before planning deployment, verify the full development flow from an empty or
+refreshed local database:
+
+1. Start Postgres and Redis.
+2. Apply migrations.
+3. Seed the default gift categories.
+4. Start Django, the Celery worker, and Celery beat.
+5. Queue the initial Hotline catalog bootstrap.
+6. Confirm that `IngestionRun` records move to `completed` in Django admin.
+7. Confirm that `/search/` loads categories and returns DB-backed results.
+8. Confirm that `/search/api/` returns gifts with `detail_url` and `best_offer`.
+9. Open a `/gifts/<slug>/` page and confirm merchant offers are sorted by live cheapest price first.
+10. Click an offer and confirm the `/api/shops/products/<id>/click/` endpoint records a `ShopClick`.
+
+Useful commands:
+
+```powershell
+python manage.py migrate
+python manage.py seed_gift_categories
+python manage.py bootstrap_hotline_catalog
+```
+
+Keep deploy work separate from this checklist. Deployment can start after the
+checks above pass and the test commands in the verification section are green.

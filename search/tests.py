@@ -1,15 +1,20 @@
-from django.test import TestCase, Client
+from django.contrib import admin
+from django.test import TestCase, Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 from decimal import Decimal
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 from gifts.models import Gift, Category, Tag
 from shops.models import PriceHistory, ProductLink, Shop
 
 from .hotline import HotlineAdapter, HotlineMerchantOffer
+from .admin import IngestionRunAdmin
 from .models import IngestionRun
 from .tasks import refresh_hotline_product
+
+FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
 
 
 class SearchGiftsAPITestCase(TestCase):
@@ -453,7 +458,102 @@ class SearchGiftsAPITestCase(TestCase):
         )
 
 
+class IngestionRunAdminActionTestCase(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().post("/admin/search/ingestionrun/")
+        self.model_admin = IngestionRunAdmin(IngestionRun, admin.site)
+        self.model_admin.message_user = Mock()
+        self.gift = Gift.objects.create(
+            name="Steam Deck Admin",
+            slug="steam-deck-admin",
+            gender="U",
+            age_min=0,
+            age_max=100,
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+            source_product_id="21916104",
+            source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
+        )
+
+    @patch("search.admin.queue_hotline_seed_refresh")
+    def test_retry_failed_runs_queues_only_failed_runs(self, mocked_queue):
+        failed = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key="gaming-gamepads",
+            status=IngestionRun.STATUS_FAILED,
+        )
+        completed = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key="gaming-laptops",
+            status=IngestionRun.STATUS_COMPLETED,
+        )
+
+        self.model_admin.retry_failed_runs(
+            self.request,
+            IngestionRun.objects.filter(id__in=[failed.id, completed.id]),
+        )
+
+        mocked_queue.assert_called_once_with("gaming-gamepads")
+        self.model_admin.message_user.assert_called_once()
+
+    @patch("search.admin.queue_hotline_product_refresh")
+    def test_requeue_selected_runs_queues_product_refresh_for_gift(self, mocked_queue):
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
+            gift=self.gift,
+            source_product_id=self.gift.source_product_id,
+            status=IngestionRun.STATUS_COMPLETED,
+        )
+
+        self.model_admin.requeue_selected_runs(
+            self.request,
+            IngestionRun.objects.filter(id=run.id),
+        )
+
+        mocked_queue.assert_called_once_with(self.gift)
+        self.model_admin.message_user.assert_called_once()
+
+    @patch("search.admin.queue_hotline_seed_refresh")
+    def test_queue_all_hotline_seed_refreshes_queues_each_seed(self, mocked_queue):
+        self.model_admin.queue_all_hotline_seed_refreshes(
+            self.request,
+            IngestionRun.objects.none(),
+        )
+
+        self.assertGreaterEqual(mocked_queue.call_count, 1)
+        self.model_admin.message_user.assert_called_once()
+
+
 class HotlineProductOfferParserTestCase(TestCase):
+    def test_parse_search_html_fixture_extracts_hotline_product_summaries(self):
+        html = (FIXTURE_DIR / "hotline_search_nuxt.html").read_text(encoding="utf-8")
+
+        offers = HotlineAdapter()._parse_search_html(html)
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].external_product_id, "21916104")
+        self.assertEqual(offers[0].external_offer_id, "hotline-product-21916104")
+        self.assertEqual(offers[0].title, "Steam Deck 256 GB")
+        self.assertEqual(
+            offers[0].product_url,
+            "https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
+        )
+        self.assertEqual(offers[0].image_url, "https://hotline.ua/img/steam-deck.jpg")
+        self.assertEqual(offers[0].price, Decimal("19499"))
+        self.assertEqual(offers[0].original_price, Decimal("21395"))
+
+    def test_parse_product_html_fixture_extracts_merchant_offers(self):
+        html = (FIXTURE_DIR / "hotline_product_nuxt.html").read_text(encoding="utf-8")
+
+        offers = HotlineAdapter()._parse_product_html(html, external_product_id="21916104")
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].external_offer_id, "101")
+        self.assertEqual(offers[0].seller_name, "GRO")
+        self.assertEqual(offers[0].seller_external_id, "77")
+        self.assertEqual(offers[0].seller_url, "https://gro.ua")
+        self.assertEqual(offers[0].original_price, Decimal("21395"))
+        self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
+
     def test_parse_product_html_extracts_merchant_offers_and_old_price(self):
         html = """
         <script>

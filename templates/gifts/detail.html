@@ -311,7 +311,14 @@
                         {% endif %}
                     </div>
                     {% if offer.in_stock %}
-                    <a class="offer-card__action" href="{{ offer.product_url }}" target="_blank" rel="noopener noreferrer">
+                    <a
+                        class="offer-card__action"
+                        href="{{ offer.product_url }}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        data-offer-click
+                        data-click-url="{% url 'shops:productlink-click' offer.id %}"
+                        data-original-url="{{ offer.product_url }}">
                         Buy
                     </a>
                     {% else %}
@@ -328,7 +335,11 @@
         </section>
     </main>
 
+    <script>
+        window.GF_CSRF_TOKEN = "{{ csrf_token }}";
+    </script>
     <script src="{% static 'js/home.js' %}"></script>
+    <script src="{% static 'js/gift-detail.js' %}"></script>
 </body>
 
 </html>
