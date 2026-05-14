@@ -11,31 +11,62 @@ GiftFlow now runs with a single active ingestion architecture:
 
 ## Local setup
 
-### 1. Start infrastructure
+### 1. Use Python 3.12
+
+The Docker runtime uses `python:3.12-slim`, so local development should use
+Python 3.12 as well.
+
+Verify that Python 3.12 is installed:
 
 ```powershell
-docker compose up -d postgres redis
+py -3.12 --version
+```
+
+If the virtual environment was created with a stale interpreter path, delete it
+and recreate it:
+
+```powershell
+deactivate
+Remove-Item -Recurse -Force .\.venv
+py -3.12 -m venv .venv
 ```
 
 ### 2. Activate the virtual environment
 
 ```powershell
-.\.venv312\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe --version
 ```
 
-### 3. Apply migrations
+### 3. Install dependencies
+
+Always invoke pip through the active Python executable, especially after
+recreating the virtual environment:
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+### 4. Start infrastructure
+
+```powershell
+docker compose up -d postgres redis
+```
+
+### 5. Apply migrations
 
 ```powershell
 python manage.py migrate
 ```
 
-### 4. Start Django
+### 6. Start Django
 
 ```powershell
 python manage.py runserver
 ```
 
-### 5. Start the Celery worker
+### 7. Start the Celery worker
 
 On Windows use `-P solo` to avoid `billiard` pool failures.
 
@@ -43,10 +74,29 @@ On Windows use `-P solo` to avoid `billiard` pool failures.
 python -m celery -A gift_idea_generator worker -l info -Q discovery,prices,verification -P solo
 ```
 
-### 6. Start Celery beat
+### 8. Start Celery beat
 
 ```powershell
 python -m celery -A gift_idea_generator beat -l info
+```
+
+## Verification
+
+Run the local checks before committing development changes:
+
+```powershell
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test gifts search shops -v 1
+```
+
+If the local virtual environment is not available, run the same checks in the
+Docker web image:
+
+```powershell
+docker compose run --rm web python manage.py check
+docker compose run --rm web python manage.py makemigrations --check --dry-run
+docker compose run --rm web python manage.py test gifts search shops -v 1
 ```
 
 ## First catalog bootstrap
