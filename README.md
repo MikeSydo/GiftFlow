@@ -99,6 +99,44 @@ docker compose run --rm web python manage.py makemigrations --check --dry-run
 docker compose run --rm web python manage.py test gifts search shops -v 1
 ```
 
+## Media storage
+
+Uploaded media defaults to local filesystem storage in `MEDIA_ROOT`. Set
+`MEDIA_STORAGE_BACKEND=s3` to store new uploads in an S3-compatible bucket
+instead. This supports AWS S3, Cloudflare R2, and compatible providers.
+
+Required S3-compatible settings:
+
+```env
+MEDIA_STORAGE_BACKEND=s3
+MEDIA_S3_BUCKET_NAME=giftflow-media
+MEDIA_S3_ACCESS_KEY_ID=replace-me
+MEDIA_S3_SECRET_ACCESS_KEY=replace-me
+MEDIA_S3_REGION_NAME=auto
+MEDIA_S3_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
+MEDIA_S3_CUSTOM_DOMAIN=media.example.com
+MEDIA_S3_LOCATION=media
+MEDIA_S3_CACHE_CONTROL=max-age=86400
+```
+
+For AWS S3, set the real bucket region in `MEDIA_S3_REGION_NAME` and leave
+`MEDIA_S3_ENDPOINT_URL` empty. For Cloudflare R2, use `auto` as the region and
+set the R2 S3 API endpoint. `MEDIA_S3_CUSTOM_DOMAIN` is optional, but recommended
+for public image URLs.
+
+Existing database values for `Gift.image`, `GiftImage.image`, and `Shop.logo`
+are relative file paths. After switching `MEDIA_STORAGE_BACKEND=s3`, copy the
+existing local files into the bucket without changing database rows:
+
+```powershell
+python manage.py copy_media_to_storage --dry-run
+python manage.py copy_media_to_storage
+```
+
+The command reads from local `MEDIA_ROOT` and writes to the active default
+storage. It does not copy external Hotline URLs from `Gift.image_url` or
+`ProductLink.image_url`.
+
 ## First catalog bootstrap
 
 Queue the configured Hotline seeds once after the services are running:
