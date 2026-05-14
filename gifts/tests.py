@@ -101,6 +101,16 @@ class GiftDetailViewTestCase(TestCase):
             ["1", "2", "3"],
         )
 
+    def test_gift_detail_uses_tracked_offer_click_urls(self):
+        response = self.client.get(reverse("gifts:gift_detail", args=[self.gift.slug]))
+        best_offer = ProductLink.objects.get(external_offer_id="1")
+
+        self.assertContains(response, "data-offer-click")
+        self.assertContains(
+            response,
+            reverse("shops:productlink-click", args=[best_offer.id]),
+        )
+
 
 class GiftAdminActionTestCase(TestCase):
     def setUp(self):

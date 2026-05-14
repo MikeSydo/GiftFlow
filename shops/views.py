@@ -109,10 +109,13 @@ class ProductLinkClickView(APIView):
         except ProductLink.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        if not request.session.session_key:
+            request.session.save()
+
         ShopClick.objects.create(
             product_link=link,
             user=request.user if request.user.is_authenticated else None,
-            session_key=request.data.get("session_key", request.session.session_key or ""),
+            session_key=request.data.get("session_key") or request.session.session_key or "",
             ip_address=self._get_client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:300],
             referrer=request.data.get("referrer"),

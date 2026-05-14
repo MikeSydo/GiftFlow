@@ -1,7 +1,12 @@
-from django.test import TestCase
+import json
+from decimal import Decimal
+from unittest.mock import patch
 
-from gifts.models import Category
-from shops.models import Shop, ShopCategoryAlias
+from django.test import TestCase
+from django.urls import reverse
+
+from gifts.models import Category, Gift
+from shops.models import ProductLink, Shop, ShopCategoryAlias, ShopClick
 from shops.services import CategoryMatcher, MatchResult, _normalise
 
 
@@ -59,4 +64,55 @@ class CategoryMatcherAliasTestCase(TestCase):
         self.assertTrue(result.needs_review)
         alias = ShopCategoryAlias.objects.get(shop=self.shop, raw_category="Odd custom label")
         self.assertEqual(alias.status, ShopCategoryAlias.STATUS_PENDING)
+
+
+class ProductLinkClickViewTestCase(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(name="Gaming", slug="gaming")
+        self.gift = Gift.objects.create(
+            name="Steam Deck Click",
+            slug="steam-deck-click",
+            category=self.category,
+            gender="U",
+            age_min=0,
+            age_max=100,
+        )
+        self.shop = Shop.objects.create(
+            name="Merchant",
+            slug="merchant",
+            website="https://merchant.example",
+            shop_type="specialized",
+            has_affiliate=True,
+            affiliate_parameter="utm_source=giftflow",
+        )
+        self.link = ProductLink.objects.create(
+            gift=self.gift,
+            shop=self.shop,
+            product_url="https://merchant.example/product?sku=1",
+            product_name="Steam Deck",
+            price=Decimal("19499.00"),
+            in_stock=True,
+        )
+
+    @patch("shops.tasks.increment_shop_click.delay")
+    def test_click_endpoint_records_click_and_returns_affiliate_url(self, mocked_delay):
+        response = self.client.post(
+            reverse("shops:productlink-click", args=[self.link.id]),
+            data=json.dumps({"referrer": "https://giftflow.example/search/"}),
+            content_type="application/json",
+            HTTP_USER_AGENT="GiftFlow Test Browser",
+            REMOTE_ADDR="203.0.113.10",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            payload["affiliate_url"],
+            "https://merchant.example/product?sku=1&utm_source=giftflow",
+        )
+
+        click = ShopClick.objects.get(product_link=self.link)
+        self.assertEqual(click.referrer, "https://giftflow.example/search/")
+        self.assertEqual(click.user_agent, "GiftFlow Test Browser")
+        mocked_delay.assert_called_once_with(self.link.id)
 
