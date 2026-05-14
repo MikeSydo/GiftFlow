@@ -3,6 +3,7 @@ from django.test import TestCase, Client, RequestFactory
 from django.urls import reverse
 from django.utils import timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from gifts.models import Gift, Category, Tag
@@ -12,6 +13,8 @@ from .hotline import HotlineAdapter, HotlineMerchantOffer
 from .admin import IngestionRunAdmin
 from .models import IngestionRun
 from .tasks import refresh_hotline_product
+
+FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
 
 
 class SearchGiftsAPITestCase(TestCase):
@@ -521,6 +524,36 @@ class IngestionRunAdminActionTestCase(TestCase):
 
 
 class HotlineProductOfferParserTestCase(TestCase):
+    def test_parse_search_html_fixture_extracts_hotline_product_summaries(self):
+        html = (FIXTURE_DIR / "hotline_search_nuxt.html").read_text(encoding="utf-8")
+
+        offers = HotlineAdapter()._parse_search_html(html)
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].external_product_id, "21916104")
+        self.assertEqual(offers[0].external_offer_id, "hotline-product-21916104")
+        self.assertEqual(offers[0].title, "Steam Deck 256 GB")
+        self.assertEqual(
+            offers[0].product_url,
+            "https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
+        )
+        self.assertEqual(offers[0].image_url, "https://hotline.ua/img/steam-deck.jpg")
+        self.assertEqual(offers[0].price, Decimal("19499"))
+        self.assertEqual(offers[0].original_price, Decimal("21395"))
+
+    def test_parse_product_html_fixture_extracts_merchant_offers(self):
+        html = (FIXTURE_DIR / "hotline_product_nuxt.html").read_text(encoding="utf-8")
+
+        offers = HotlineAdapter()._parse_product_html(html, external_product_id="21916104")
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(offers[0].external_offer_id, "101")
+        self.assertEqual(offers[0].seller_name, "GRO")
+        self.assertEqual(offers[0].seller_external_id, "77")
+        self.assertEqual(offers[0].seller_url, "https://gro.ua")
+        self.assertEqual(offers[0].original_price, Decimal("21395"))
+        self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
+
     def test_parse_product_html_extracts_merchant_offers_and_old_price(self):
         html = """
         <script>
