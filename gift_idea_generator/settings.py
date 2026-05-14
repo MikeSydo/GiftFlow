@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from datetime import timedelta
 import os
 from pathlib import Path
+from typing import Mapping
 from urllib.parse import quote
 
 import dj_database_url
@@ -83,6 +84,86 @@ def build_redis_url() -> str:
 
 SCRAPING_USER_AGENT = os.getenv("SCRAPING_USER_AGENT", "").strip()
 DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "INFO").upper()
+
+
+def _get_env(environ: Mapping[str, str] | None, key: str, default: str = "") -> str:
+    source = os.environ if environ is None else environ
+    return str(source.get(key, default)).strip()
+
+
+def build_s3_media_storage_options(
+    environ: Mapping[str, str] | None = None,
+) -> dict:
+    required_keys = (
+        "MEDIA_S3_BUCKET_NAME",
+        "MEDIA_S3_ACCESS_KEY_ID",
+        "MEDIA_S3_SECRET_ACCESS_KEY",
+    )
+    missing_keys = [key for key in required_keys if not _get_env(environ, key)]
+    if missing_keys:
+        raise ImproperlyConfigured(
+            "Set these variables when MEDIA_STORAGE_BACKEND=s3: "
+            + ", ".join(missing_keys),
+        )
+
+    options = {
+        "bucket_name": _get_env(environ, "MEDIA_S3_BUCKET_NAME"),
+        "access_key": _get_env(environ, "MEDIA_S3_ACCESS_KEY_ID"),
+        "secret_key": _get_env(environ, "MEDIA_S3_SECRET_ACCESS_KEY"),
+        "region_name": _get_env(environ, "MEDIA_S3_REGION_NAME", "auto"),
+        "location": _get_env(environ, "MEDIA_S3_LOCATION", "media").strip("/"),
+        "querystring_auth": False,
+        "file_overwrite": False,
+        "object_parameters": {
+            "CacheControl": _get_env(
+                environ,
+                "MEDIA_S3_CACHE_CONTROL",
+                "max-age=86400",
+            ),
+        },
+    }
+
+    endpoint_url = _get_env(environ, "MEDIA_S3_ENDPOINT_URL")
+    if endpoint_url:
+        options["endpoint_url"] = endpoint_url
+
+    custom_domain = _get_env(environ, "MEDIA_S3_CUSTOM_DOMAIN")
+    if custom_domain:
+        options["custom_domain"] = custom_domain
+
+    return options
+
+
+def build_default_storage_config(
+    environ: Mapping[str, str] | None = None,
+) -> dict:
+    backend = _get_env(environ, "MEDIA_STORAGE_BACKEND", "local").lower()
+    if backend == "local":
+        return {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {
+                "location": MEDIA_ROOT,
+                "base_url": MEDIA_URL,
+            },
+        }
+    if backend == "s3":
+        return {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": build_s3_media_storage_options(environ),
+        }
+    raise ImproperlyConfigured(
+        "MEDIA_STORAGE_BACKEND must be either 'local' or 's3'.",
+    )
+
+
+def build_staticfiles_storage_config() -> dict:
+    if DEBUG:
+        return {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        }
+    return {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    }
 
 
 # Application definition
@@ -184,7 +265,6 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/6.0/ref/settings/#default-auto-field
@@ -194,6 +274,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+STORAGES = {
+    "default": build_default_storage_config(),
+    "staticfiles": build_staticfiles_storage_config(),
+}
 
 # Celery
 CELERY_BROKER_URL = build_redis_url()
