@@ -1,8 +1,11 @@
 import json
 from decimal import Decimal
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from gifts.models import Category, Gift
@@ -64,6 +67,62 @@ class CategoryMatcherAliasTestCase(TestCase):
         self.assertTrue(result.needs_review)
         alias = ShopCategoryAlias.objects.get(shop=self.shop, raw_category="Odd custom label")
         self.assertEqual(alias.status, ShopCategoryAlias.STATUS_PENDING)
+
+
+class ShopMediaFileCleanupTestCase(TestCase):
+    @staticmethod
+    def _storage_settings(destination_root):
+        return {
+            "default": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {
+                    "location": destination_root,
+                    "base_url": "/uploaded-media/",
+                },
+            },
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            },
+        }
+
+    @staticmethod
+    def _save_file(name, content=b"logo"):
+        return default_storage.save(name, ContentFile(content))
+
+    def test_deleting_shop_removes_logo_file(self):
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                logo_name = self._save_file("shops/static/images/delete-logo.png")
+                shop = Shop.objects.create(
+                    name="Delete Logo Shop",
+                    slug="delete-logo-shop",
+                    website="https://delete-logo.example",
+                    shop_type="specialized",
+                    logo=logo_name,
+                )
+
+                shop.delete()
+
+                self.assertFalse(default_storage.exists(logo_name))
+
+    def test_replacing_shop_logo_removes_old_file(self):
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                old_logo = self._save_file("shops/static/images/old-logo.png", b"old")
+                new_logo = self._save_file("shops/static/images/new-logo.png", b"new")
+                shop = Shop.objects.create(
+                    name="Replace Logo Shop",
+                    slug="replace-logo-shop",
+                    website="https://replace-logo.example",
+                    shop_type="specialized",
+                    logo=old_logo,
+                )
+
+                shop.logo = new_logo
+                shop.save(update_fields=["logo"])
+
+                self.assertFalse(default_storage.exists(old_logo))
+                self.assertTrue(default_storage.exists(new_logo))
 
 
 class ProductLinkClickViewTestCase(TestCase):

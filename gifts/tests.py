@@ -4,6 +4,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from django.contrib import admin
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.management import call_command
 from decimal import Decimal
 
@@ -150,6 +152,76 @@ class CopyMediaToStorageCommandTestCase(TestCase):
 
             self.assertIn("copied=0", output.getvalue())
             self.assertIn("missing=0", output.getvalue())
+
+
+class MediaFileCleanupTestCase(TestCase):
+    @staticmethod
+    def _storage_settings(destination_root):
+        return {
+            "default": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {
+                    "location": destination_root,
+                    "base_url": "/uploaded-media/",
+                },
+            },
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            },
+        }
+
+    def setUp(self):
+        self.category = Category.objects.create(
+            name="Cleanup",
+            slug="cleanup",
+            is_active=True,
+        )
+
+    @staticmethod
+    def _save_file(name, content=b"image"):
+        return default_storage.save(name, ContentFile(content))
+
+    def test_deleting_gift_removes_primary_and_gallery_files(self):
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                image_name = self._save_file("gifts/delete-primary.jpg")
+                gallery_name = self._save_file("gifts/gallery/delete-gallery.jpg")
+                gift = Gift.objects.create(
+                    name="Delete Gift",
+                    slug="delete-gift",
+                    category=self.category,
+                    gender="U",
+                    age_min=0,
+                    age_max=100,
+                    image=image_name,
+                )
+                GiftImage.objects.create(gift=gift, image=gallery_name)
+
+                gift.delete()
+
+                self.assertFalse(default_storage.exists(image_name))
+                self.assertFalse(default_storage.exists(gallery_name))
+
+    def test_replacing_gift_image_removes_old_file(self):
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                old_name = self._save_file("gifts/old.jpg", b"old")
+                new_name = self._save_file("gifts/new.jpg", b"new")
+                gift = Gift.objects.create(
+                    name="Replace Gift",
+                    slug="replace-gift",
+                    category=self.category,
+                    gender="U",
+                    age_min=0,
+                    age_max=100,
+                    image=old_name,
+                )
+
+                gift.image = new_name
+                gift.save(update_fields=["image"])
+
+                self.assertFalse(default_storage.exists(old_name))
+                self.assertTrue(default_storage.exists(new_name))
 
 
 class GiftDetailViewTestCase(TestCase):
