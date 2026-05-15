@@ -1,10 +1,12 @@
 from django.contrib import admin
 from django.core.files.storage import default_storage
+from django.core.management import call_command
 from django.test import TestCase, Client, RequestFactory
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from decimal import Decimal
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -622,8 +624,8 @@ class HotlineGiftImageCacheTestCase(TestCase):
     @patch("search.services.httpx.Client")
     def test_upsert_hotline_gift_caches_image_in_default_storage(self, mocked_client):
         response = Mock()
-        response.headers = {"content-type": "image/jpeg"}
-        response.content = b"jpeg-bytes"
+        response.headers = {"content-type": "image/gif"}
+        response.content = b"gif-bytes"
         response.raise_for_status.return_value = None
         mocked_client.return_value.__enter__.return_value.get.return_value = response
 
@@ -637,10 +639,10 @@ class HotlineGiftImageCacheTestCase(TestCase):
                 self.assertTrue(created)
                 self.assertTrue(changed)
                 self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
-                self.assertEqual(gift.image.name, "gifts/hotline/659422.jpg")
+                self.assertEqual(gift.image.name, "gifts/hotline/659422.gif")
                 self.assertTrue(default_storage.exists(gift.image.name))
                 with default_storage.open(gift.image.name, "rb") as cached_file:
-                    self.assertEqual(cached_file.read(), b"jpeg-bytes")
+                    self.assertEqual(cached_file.read(), b"gif-bytes")
 
         mocked_client.return_value.__enter__.return_value.get.assert_called_once_with(
             "https://hotline.ua/img/gamepad.jpg",
@@ -663,6 +665,35 @@ class HotlineGiftImageCacheTestCase(TestCase):
         self.assertTrue(changed)
         self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
         self.assertFalse(gift.image)
+
+    @patch("search.services.httpx.Client")
+    def test_cache_hotline_images_command_caches_existing_image_urls(self, mocked_client):
+        response = Mock()
+        response.headers = {"content-type": "image/jpeg"}
+        response.content = b"image-bytes"
+        response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.return_value = response
+
+        gift = Gift.objects.create(
+            name="Existing Hotline Gift",
+            slug="existing-hotline-gift",
+            gender="U",
+            age_min=0,
+            age_max=100,
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+            source_product_id="12345",
+            image_url="https://hotline.ua/img/existing.jpg",
+        )
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                output = StringIO()
+                call_command("cache_hotline_images", stdout=output)
+
+                gift.refresh_from_db()
+                self.assertEqual(gift.image.name, "gifts/hotline/12345.jpg")
+                self.assertTrue(default_storage.exists(gift.image.name))
+                self.assertIn("cached=1", output.getvalue())
 
 
 class HotlineProductRefreshTaskTestCase(TestCase):

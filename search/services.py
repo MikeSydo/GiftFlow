@@ -27,6 +27,7 @@ HOTLINE_CATALOG_SOURCE = Gift.CATALOG_SOURCE_HOTLINE
 HOTLINE_IMAGE_TIMEOUT = 15
 HOTLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 HOTLINE_IMAGE_ALLOWED_TYPES = {
+    "image/gif": ".gif",
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
