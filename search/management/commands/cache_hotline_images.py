@@ -41,7 +41,11 @@ class Command(BaseCommand):
         cached = 0
         skipped = 0
         for gift in queryset.iterator():
-            if cache_hotline_gift_image(gift, gift.image_url):
+            if cache_hotline_gift_image(
+                gift,
+                gift.image_url,
+                product_url=gift.source_product_url,
+            ):
                 gift.save(update_fields=["image", "updated_at"])
                 cached += 1
             else:

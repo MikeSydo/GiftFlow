@@ -5,6 +5,8 @@ import mimetypes
 import re
 from datetime import timedelta
 from decimal import Decimal
+from html import unescape
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from django.db.models import Max, Min, OuterRef, Q, QuerySet, Subquery
@@ -26,12 +28,21 @@ MAX_RESULTS = 20
 HOTLINE_CATALOG_SOURCE = Gift.CATALOG_SOURCE_HOTLINE
 HOTLINE_IMAGE_TIMEOUT = 15
 HOTLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+HOTLINE_PLACEHOLDER_MAX_BYTES = 4096
 HOTLINE_IMAGE_ALLOWED_TYPES = {
     "image/gif": ".gif",
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
 }
+HOTLINE_OG_IMAGE_PATTERN = re.compile(
+    r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+    re.I,
+)
+HOTLINE_TX_PLACEHOLDER_IMAGE_PATTERN = re.compile(
+    r"^(?P<prefix>https://hotline\.ua/img/tx/\d+/\d+)0(?P<suffix>\.[a-z0-9]+)$",
+    re.I,
+)
 
 
 def normalize_search_query(query: str) -> str:
@@ -132,60 +143,145 @@ def _extension_from_image_response(response: httpx.Response, image_url: str) -> 
     return ".jpg"
 
 
-def cache_hotline_gift_image(gift: Gift, image_url: str | None) -> bool:
-    if not image_url or gift.image:
-        return False
+def _download_hotline_url(url: str) -> httpx.Response:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0.0.0 Safari/537.36"
+        ),
+    }
+    with httpx.Client(timeout=HOTLINE_IMAGE_TIMEOUT, follow_redirects=True, headers=headers) as client:
+        response = client.get(url)
+        response.raise_for_status()
+        return response
 
-    try:
-        with httpx.Client(timeout=HOTLINE_IMAGE_TIMEOUT, follow_redirects=True) as client:
-            response = client.get(image_url)
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
+
+def _hotline_product_url_candidates(product_url: str) -> list[str]:
+    if not product_url:
+        return []
+
+    urls = [product_url]
+    parsed = urlsplit(product_url)
+    if parsed.netloc != "hotline.ua":
+        return urls
+
+    path = parsed.path or "/"
+    if path.startswith("/ua/"):
+        alternate_path = path[3:] or "/"
+    else:
+        alternate_path = f"/ua{path if path.startswith('/') else f'/{path}'}"
+
+    alternate_url = urlunsplit(parsed._replace(path=alternate_path))
+    if alternate_url not in urls:
+        urls.append(alternate_url)
+    return urls
+
+
+def resolve_hotline_product_image_url(product_url: str, fallback_url: str | None = None) -> str | None:
+    errors = []
+    for candidate_url in _hotline_product_url_candidates(product_url):
+        try:
+            response = _download_hotline_url(candidate_url)
+        except httpx.HTTPError as exc:
+            errors.append(f"{candidate_url}: {exc}")
+            continue
+
+        match = HOTLINE_OG_IMAGE_PATTERN.search(response.text)
+        if match:
+            return unescape(match.group(1))
+
+    if errors:
         logger.warning(
-            "[hotline] failed to download gift image gift=%s url=%s error=%s",
-            gift.id or gift.source_product_id,
-            image_url,
-            exc,
+            "[hotline] failed to resolve product image url product_url=%s errors=%s",
+            product_url,
+            "; ".join(errors),
         )
+    return fallback_url
+
+
+def _hotline_image_url_candidates(image_url: str) -> list[str]:
+    urls = [image_url]
+    match = HOTLINE_TX_PLACEHOLDER_IMAGE_PATTERN.match(image_url)
+    if match:
+        alternate_url = f"{match.group('prefix')}5{match.group('suffix')}"
+        if alternate_url not in urls:
+            urls.append(alternate_url)
+    return urls
+
+
+def cache_hotline_gift_image(
+    gift: Gift,
+    image_url: str | None,
+    *,
+    product_url: str = "",
+) -> bool:
+    if gift.image:
         return False
 
-    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-    if content_type and content_type not in HOTLINE_IMAGE_ALLOWED_TYPES:
-        logger.warning(
-            "[hotline] skipped unsupported gift image type gift=%s url=%s content_type=%s",
-            gift.id or gift.source_product_id,
-            image_url,
-            content_type,
-        )
+    resolved_url = resolve_hotline_product_image_url(product_url, image_url)
+    if not resolved_url:
         return False
 
-    content = response.content
-    if not content or len(content) > HOTLINE_IMAGE_MAX_BYTES:
-        logger.warning(
-            "[hotline] skipped invalid gift image size gift=%s url=%s size=%d",
-            gift.id or gift.source_product_id,
-            image_url,
-            len(content),
-        )
-        return False
+    for candidate_url in _hotline_image_url_candidates(resolved_url):
+        try:
+            response = _download_hotline_url(candidate_url)
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "[hotline] failed to download gift image gift=%s url=%s error=%s",
+                gift.id or gift.source_product_id,
+                candidate_url,
+                exc,
+            )
+            continue
 
-    source_product_id = gift.source_product_id or "unknown"
-    extension = _extension_from_image_response(response, image_url)
-    filename = f"hotline/{source_product_id}{extension}"
-    try:
-        gift.image.save(filename, ContentFile(content), save=False)
-    except Exception as exc:
-        logger.warning(
-            "[hotline] failed to store gift image gift=%s url=%s error=%s",
-            gift.id or gift.source_product_id,
-            image_url,
-            exc,
-        )
-        gift.image = ""
-        return False
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        if content_type and content_type not in HOTLINE_IMAGE_ALLOWED_TYPES:
+            logger.warning(
+                "[hotline] skipped unsupported gift image type gift=%s url=%s content_type=%s",
+                gift.id or gift.source_product_id,
+                candidate_url,
+                content_type,
+            )
+            continue
 
-    logger.info("[hotline] cached gift image gift=%s file=%s", gift.id, gift.image.name)
-    return True
+        content = response.content
+        if not content or len(content) > HOTLINE_IMAGE_MAX_BYTES:
+            logger.warning(
+                "[hotline] skipped invalid gift image size gift=%s url=%s size=%d",
+                gift.id or gift.source_product_id,
+                candidate_url,
+                len(content),
+            )
+            continue
+        if content_type == "image/gif" and len(content) <= HOTLINE_PLACEHOLDER_MAX_BYTES:
+            logger.warning(
+                "[hotline] skipped likely placeholder gift image gift=%s url=%s size=%d",
+                gift.id or gift.source_product_id,
+                candidate_url,
+                len(content),
+            )
+            continue
+
+        source_product_id = gift.source_product_id or "unknown"
+        extension = _extension_from_image_response(response, candidate_url)
+        filename = f"hotline/{source_product_id}{extension}"
+        try:
+            gift.image.save(filename, ContentFile(content), save=False)
+        except Exception as exc:
+            logger.warning(
+                "[hotline] failed to store gift image gift=%s url=%s error=%s",
+                gift.id or gift.source_product_id,
+                candidate_url,
+                exc,
+            )
+            gift.image = ""
+            continue
+
+        logger.info("[hotline] cached gift image gift=%s file=%s", gift.id, gift.image.name)
+        return True
+
+    return False
 
 
 def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, bool, bool]:
@@ -246,11 +342,19 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
             changed_fields.append(field)
 
     if created:
-        cache_hotline_gift_image(gift, summary.image_url)
+        cache_hotline_gift_image(
+            gift,
+            summary.image_url,
+            product_url=summary.product_url,
+        )
         gift.save()
         return gift, True, True
 
-    if cache_hotline_gift_image(gift, summary.image_url):
+    if cache_hotline_gift_image(
+        gift,
+        summary.image_url,
+        product_url=summary.product_url,
+    ):
         changed_fields.append("image")
 
     if changed_fields:

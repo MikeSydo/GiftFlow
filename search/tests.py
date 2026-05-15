@@ -20,7 +20,7 @@ from .hotline import HotlineAdapter, HotlineMerchantOffer, HotlineOffer
 from .admin import IngestionRunAdmin
 from .models import IngestionRun
 from .seeds import HotlineSeed
-from .services import upsert_hotline_gift_from_summary
+from .services import resolve_hotline_product_image_url, upsert_hotline_gift_from_summary
 from .tasks import refresh_hotline_product
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
@@ -623,11 +623,20 @@ class HotlineGiftImageCacheTestCase(TestCase):
 
     @patch("search.services.httpx.Client")
     def test_upsert_hotline_gift_caches_image_in_default_storage(self, mocked_client):
-        response = Mock()
-        response.headers = {"content-type": "image/gif"}
-        response.content = b"gif-bytes"
-        response.raise_for_status.return_value = None
-        mocked_client.return_value.__enter__.return_value.get.return_value = response
+        product_response = Mock()
+        product_response.text = (
+            '<meta property="og:image" '
+            'content="https://hotline.ua/img/real-gamepad.jpg">'
+        )
+        product_response.raise_for_status.return_value = None
+        image_response = Mock()
+        image_response.headers = {"content-type": "image/jpeg"}
+        image_response.content = b"jpeg-bytes"
+        image_response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.side_effect = [
+            product_response,
+            image_response,
+        ]
 
         with TemporaryDirectory() as destination_root:
             with override_settings(STORAGES=self._storage_settings(destination_root)):
@@ -639,13 +648,16 @@ class HotlineGiftImageCacheTestCase(TestCase):
                 self.assertTrue(created)
                 self.assertTrue(changed)
                 self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
-                self.assertEqual(gift.image.name, "gifts/hotline/659422.gif")
+                self.assertEqual(gift.image.name, "gifts/hotline/659422.jpg")
                 self.assertTrue(default_storage.exists(gift.image.name))
                 with default_storage.open(gift.image.name, "rb") as cached_file:
-                    self.assertEqual(cached_file.read(), b"gif-bytes")
+                    self.assertEqual(cached_file.read(), b"jpeg-bytes")
 
-        mocked_client.return_value.__enter__.return_value.get.assert_called_once_with(
-            "https://hotline.ua/img/gamepad.jpg",
+        mocked_client.return_value.__enter__.return_value.get.assert_any_call(
+            "https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/659422/",
+        )
+        mocked_client.return_value.__enter__.return_value.get.assert_any_call(
+            "https://hotline.ua/img/real-gamepad.jpg",
         )
 
     @patch("search.services.httpx.Client")
@@ -668,11 +680,20 @@ class HotlineGiftImageCacheTestCase(TestCase):
 
     @patch("search.services.httpx.Client")
     def test_cache_hotline_images_command_caches_existing_image_urls(self, mocked_client):
-        response = Mock()
-        response.headers = {"content-type": "image/jpeg"}
-        response.content = b"image-bytes"
-        response.raise_for_status.return_value = None
-        mocked_client.return_value.__enter__.return_value.get.return_value = response
+        product_response = Mock()
+        product_response.text = (
+            '<meta property="og:image" '
+            'content="https://hotline.ua/img/existing-real.jpg">'
+        )
+        product_response.raise_for_status.return_value = None
+        image_response = Mock()
+        image_response.headers = {"content-type": "image/jpeg"}
+        image_response.content = b"image-bytes"
+        image_response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.side_effect = [
+            product_response,
+            image_response,
+        ]
 
         gift = Gift.objects.create(
             name="Existing Hotline Gift",
@@ -682,6 +703,7 @@ class HotlineGiftImageCacheTestCase(TestCase):
             age_max=100,
             catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
             source_product_id="12345",
+            source_product_url="https://hotline.ua/ua/product/existing/",
             image_url="https://hotline.ua/img/existing.jpg",
         )
 
@@ -694,6 +716,108 @@ class HotlineGiftImageCacheTestCase(TestCase):
                 self.assertEqual(gift.image.name, "gifts/hotline/12345.jpg")
                 self.assertTrue(default_storage.exists(gift.image.name))
                 self.assertIn("cached=1", output.getvalue())
+
+    @patch("search.services.httpx.Client")
+    def test_upsert_hotline_gift_skips_small_placeholder_gif(self, mocked_client):
+        product_response = Mock()
+        product_response.text = ""
+        product_response.raise_for_status.return_value = None
+        localized_product_response = Mock()
+        localized_product_response.text = ""
+        localized_product_response.raise_for_status.return_value = None
+        placeholder_response = Mock()
+        placeholder_response.headers = {"content-type": "image/gif"}
+        placeholder_response.content = b"0" * 3009
+        placeholder_response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.side_effect = [
+            product_response,
+            localized_product_response,
+            placeholder_response,
+        ]
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                gift, created, changed = upsert_hotline_gift_from_summary(
+                    self._seed(),
+                    self._summary(),
+                )
+
+        self.assertTrue(created)
+        self.assertTrue(changed)
+        self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
+        self.assertFalse(gift.image)
+
+    @patch("search.services.httpx.Client")
+    def test_upsert_hotline_gift_tries_neighbor_image_when_search_image_is_placeholder(self, mocked_client):
+        product_response = Mock()
+        product_response.text = ""
+        product_response.raise_for_status.return_value = None
+        localized_product_response = Mock()
+        localized_product_response.text = ""
+        localized_product_response.raise_for_status.return_value = None
+        placeholder_response = Mock()
+        placeholder_response.headers = {"content-type": "image/gif"}
+        placeholder_response.content = b"0" * 3009
+        placeholder_response.raise_for_status.return_value = None
+        real_image_response = Mock()
+        real_image_response.headers = {"content-type": "image/jpeg"}
+        real_image_response.content = b"real-jpeg-bytes"
+        real_image_response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.side_effect = [
+            product_response,
+            localized_product_response,
+            placeholder_response,
+            real_image_response,
+        ]
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                gift, created, changed = upsert_hotline_gift_from_summary(
+                    self._seed(),
+                    self._summary(image_url="https://hotline.ua/img/tx/571/5714896300.jpg"),
+                )
+
+                self.assertTrue(created)
+                self.assertTrue(changed)
+                self.assertEqual(gift.image.name, "gifts/hotline/659422.jpg")
+                with default_storage.open(gift.image.name, "rb") as cached_file:
+                    self.assertEqual(cached_file.read(), b"real-jpeg-bytes")
+
+        mocked_client.return_value.__enter__.return_value.get.assert_any_call(
+            "https://hotline.ua/img/tx/571/5714896305.jpg",
+        )
+
+    @patch("search.services.httpx.Client")
+    def test_resolve_hotline_product_image_url_tries_ua_path_variant(self, mocked_client):
+        not_found_response = Mock()
+        not_found_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "not found",
+            request=Mock(),
+            response=Mock(status_code=404),
+        )
+        product_response = Mock()
+        product_response.text = (
+            '<meta property="og:image" '
+            'content="https://hotline.ua/img/real-from-ua.jpg">'
+        )
+        product_response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.side_effect = [
+            not_found_response,
+            product_response,
+        ]
+
+        resolved_url = resolve_hotline_product_image_url(
+            "https://hotline.ua/computer-gejmpady-dzhojstiki-ruli/logitech-gamepad-f310/",
+            "https://hotline.ua/img/placeholder.jpg",
+        )
+
+        self.assertEqual(resolved_url, "https://hotline.ua/img/real-from-ua.jpg")
+        mocked_client.return_value.__enter__.return_value.get.assert_any_call(
+            "https://hotline.ua/computer-gejmpady-dzhojstiki-ruli/logitech-gamepad-f310/",
+        )
+        mocked_client.return_value.__enter__.return_value.get.assert_any_call(
+            "https://hotline.ua/ua/computer-gejmpady-dzhojstiki-ruli/logitech-gamepad-f310/",
+        )
 
 
 class HotlineProductRefreshTaskTestCase(TestCase):
