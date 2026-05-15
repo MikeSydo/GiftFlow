@@ -118,6 +118,35 @@
             opacity: .65;
         }
 
+        .offer-card__identity {
+            display: flex;
+            align-items: center;
+            gap: .85rem;
+            min-width: 0;
+        }
+
+        .offer-card__logo {
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, .08);
+            background: rgba(255, 255, 255, .08);
+            object-fit: contain;
+        }
+
+        .offer-card__logo-fallback {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-primary, #f5efe9);
+            font-weight: 700;
+        }
+
+        .offer-card__copy {
+            min-width: 0;
+        }
+
         .offer-card__shop {
             margin: 0 0 .25rem;
             font-size: 1rem;
@@ -197,6 +226,14 @@
 
             .offer-card__price {
                 text-align: left;
+            }
+        }
+
+        @media (max-width: 520px) {
+            .offer-card__logo {
+                width: 40px;
+                height: 40px;
+                flex-basis: 40px;
             }
         }
     </style>
@@ -295,14 +332,23 @@
             <div class="offers-list">
                 {% for offer in offers %}
                 <article class="offer-card {% if not offer.in_stock %}offer-card--inactive{% endif %}">
-                    <div>
-                        <h3 class="offer-card__shop">{{ offer.shop.name }}</h3>
-                        <div class="offer-card__seller">{{ offer.seller_name|default:offer.shop.name }}</div>
-                        {% if offer.in_stock %}
-                        <span class="offer-card__status offer-card__status--live">Available</span>
+                    <div class="offer-card__identity">
+                        {% if offer.shop.logo %}
+                        <img class="offer-card__logo" src="{{ offer.shop.logo.url }}" alt="{{ offer.shop.name }} logo" />
                         {% else %}
-                        <span class="offer-card__status">Unavailable</span>
+                        <span class="offer-card__logo offer-card__logo-fallback" aria-hidden="true">
+                            {{ offer.shop.name|first }}
+                        </span>
                         {% endif %}
+                        <div class="offer-card__copy">
+                            <h3 class="offer-card__shop">{{ offer.shop.name }}</h3>
+                            <div class="offer-card__seller">{{ offer.seller_name|default:offer.shop.name }}</div>
+                            {% if offer.in_stock %}
+                            <span class="offer-card__status offer-card__status--live">Available</span>
+                            {% else %}
+                            <span class="offer-card__status">Unavailable</span>
+                            {% endif %}
+                        </div>
                     </div>
                     <div class="offer-card__price">
                         <span class="offer-card__price-current">{{ offer.price }} UAH</span>

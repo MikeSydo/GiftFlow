@@ -311,6 +311,15 @@ class GiftDetailViewTestCase(TestCase):
             reverse("shops:productlink-click", args=[best_offer.id]),
         )
 
+    def test_gift_detail_renders_shop_logo_when_available(self):
+        self.shop_fast.logo = "shops/static/images/hotline/fast-shop.png"
+        self.shop_fast.save(update_fields=["logo"])
+
+        response = self.client.get(reverse("gifts:gift_detail", args=[self.gift.slug]))
+
+        self.assertContains(response, "offer-card__logo")
+        self.assertContains(response, "/media/shops/static/images/hotline/fast-shop.png")
+
 
 class GiftAdminActionTestCase(TestCase):
     def setUp(self):

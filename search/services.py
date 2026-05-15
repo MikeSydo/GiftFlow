@@ -34,6 +34,8 @@ HOTLINE_IMAGE_ALLOWED_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
 }
 HOTLINE_OG_IMAGE_PATTERN = re.compile(
     r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
@@ -208,6 +210,92 @@ def _hotline_image_url_candidates(image_url: str) -> list[str]:
         if alternate_url not in urls:
             urls.append(alternate_url)
     return urls
+
+
+def _website_favicon_candidates(website: str | None) -> list[str]:
+    if not website:
+        return []
+
+    parsed = urlsplit(_canonical_website(website))
+    if not parsed.netloc:
+        return []
+
+    origin = urlunsplit((parsed.scheme or "https", parsed.netloc, "", "", ""))
+    return [
+        f"{origin}/favicon.ico",
+        f"{origin}/favicon.png",
+        f"{origin}/apple-touch-icon.png",
+    ]
+
+
+def cache_shop_logo(
+    shop: Shop,
+    logo_url: str | None = None,
+    *,
+    seller_website: str | None = None,
+    use_favicon: bool = True,
+) -> bool:
+    if shop.logo:
+        return False
+
+    candidates = []
+    if logo_url:
+        candidates.append(logo_url)
+    if use_favicon:
+        for candidate in _website_favicon_candidates(seller_website or shop.website):
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+    for candidate_url in candidates:
+        try:
+            response = _download_hotline_url(candidate_url)
+        except httpx.HTTPError as exc:
+            logger.info(
+                "[hotline] failed to download shop logo shop=%s url=%s error=%s",
+                shop.id or shop.slug,
+                candidate_url,
+                exc,
+            )
+            continue
+
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+        if content_type and content_type not in HOTLINE_IMAGE_ALLOWED_TYPES:
+            logger.info(
+                "[hotline] skipped unsupported shop logo type shop=%s url=%s content_type=%s",
+                shop.id or shop.slug,
+                candidate_url,
+                content_type,
+            )
+            continue
+
+        content = response.content
+        if not content or len(content) > HOTLINE_IMAGE_MAX_BYTES:
+            logger.info(
+                "[hotline] skipped invalid shop logo size shop=%s url=%s size=%d",
+                shop.id or shop.slug,
+                candidate_url,
+                len(content),
+            )
+            continue
+
+        extension = _extension_from_image_response(response, candidate_url)
+        filename = f"hotline/{shop.slug}{extension}"
+        try:
+            shop.logo.save(filename, ContentFile(content), save=False)
+        except Exception as exc:
+            logger.warning(
+                "[hotline] failed to store shop logo shop=%s url=%s error=%s",
+                shop.id or shop.slug,
+                candidate_url,
+                exc,
+            )
+            shop.logo = ""
+            continue
+
+        logger.info("[hotline] cached shop logo shop=%s file=%s", shop.id, shop.logo.name)
+        return True
+
+    return False
 
 
 def cache_hotline_gift_image(
@@ -505,6 +593,13 @@ def get_or_create_hotline_merchant_shop(offer) -> Shop:
         if not shop.is_active:
             shop.is_active = True
             update_fields.append("is_active")
+        if cache_shop_logo(
+            shop,
+            getattr(offer, "seller_logo_url", None),
+            seller_website=website,
+            use_favicon=False,
+        ):
+            update_fields.append("logo")
         if update_fields:
             shop.save(update_fields=update_fields + ["updated_at"])
         return shop
@@ -522,6 +617,13 @@ def get_or_create_hotline_merchant_shop(offer) -> Shop:
         specialization="Hotline merchant",
         is_active=True,
     )
+    if cache_shop_logo(
+        shop,
+        getattr(offer, "seller_logo_url", None),
+        seller_website=website,
+        use_favicon=False,
+    ):
+        shop.save(update_fields=["logo", "updated_at"])
     return shop
 
 

@@ -20,7 +20,7 @@ from .hotline import HotlineAdapter, HotlineMerchantOffer, HotlineOffer
 from .admin import IngestionRunAdmin
 from .models import IngestionRun
 from .seeds import HotlineSeed
-from .services import resolve_hotline_product_image_url, upsert_hotline_gift_from_summary
+from .services import cache_shop_logo, resolve_hotline_product_image_url, upsert_hotline_gift_from_summary
 from .tasks import refresh_hotline_product
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
@@ -560,6 +560,7 @@ class HotlineProductOfferParserTestCase(TestCase):
         self.assertEqual(offers[0].seller_name, "GRO")
         self.assertEqual(offers[0].seller_external_id, "77")
         self.assertEqual(offers[0].seller_url, "https://gro.ua")
+        self.assertEqual(offers[0].seller_logo_url, "https://hotline.ua/img/shops/gro-logo.png")
         self.assertEqual(offers[0].original_price, Decimal("21395"))
         self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
 
@@ -818,6 +819,57 @@ class HotlineGiftImageCacheTestCase(TestCase):
         mocked_client.return_value.__enter__.return_value.get.assert_any_call(
             "https://hotline.ua/ua/computer-gejmpady-dzhojstiki-ruli/logitech-gamepad-f310/",
         )
+
+    @patch("search.services.httpx.Client")
+    def test_cache_shop_logo_uses_explicit_logo_url(self, mocked_client):
+        response = Mock()
+        response.headers = {"content-type": "image/png"}
+        response.content = b"png-logo"
+        response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.return_value = response
+
+        shop = Shop.objects.create(
+            name="Logo Shop",
+            slug="logo-shop",
+            website="https://logo-shop.example",
+            shop_type="specialized",
+        )
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                cached = cache_shop_logo(shop, "https://hotline.ua/img/shops/logo.png")
+                shop.save(update_fields=["logo"])
+
+                self.assertTrue(cached)
+                self.assertEqual(shop.logo.name, "shops/static/images/hotline/logo-shop.png")
+                self.assertTrue(default_storage.exists(shop.logo.name))
+                with default_storage.open(shop.logo.name, "rb") as logo_file:
+                    self.assertEqual(logo_file.read(), b"png-logo")
+
+    @patch("search.services.httpx.Client")
+    def test_cache_shop_logos_command_caches_favicon(self, mocked_client):
+        response = Mock()
+        response.headers = {"content-type": "image/x-icon"}
+        response.content = b"ico-logo"
+        response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.return_value = response
+
+        shop = Shop.objects.create(
+            name="Favicon Shop",
+            slug="favicon-shop",
+            website="https://favicon-shop.example/catalog",
+            shop_type="specialized",
+        )
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                output = StringIO()
+                call_command("cache_shop_logos", stdout=output)
+
+                shop.refresh_from_db()
+                self.assertEqual(shop.logo.name, "shops/static/images/hotline/favicon-shop.ico")
+                self.assertTrue(default_storage.exists(shop.logo.name))
+                self.assertIn("cached=1", output.getvalue())
 
 
 class HotlineProductRefreshTaskTestCase(TestCase):
