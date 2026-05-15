@@ -137,6 +137,12 @@ The command reads from local `MEDIA_ROOT` and writes to the active default
 storage. It does not copy external Hotline URLs from `Gift.image_url` or
 `ProductLink.image_url`.
 
+Hotline seed refreshes cache newly discovered product images into `Gift.image`
+through the configured default storage. With `MEDIA_STORAGE_BACKEND=s3`, these
+files are uploaded to the S3-compatible bucket under `MEDIA_S3_LOCATION`. The
+original Hotline URL remains in `Gift.image_url` as a source reference and
+fallback if the download fails.
+
 ## First catalog bootstrap
 
 Queue the configured Hotline seeds once after the services are running:

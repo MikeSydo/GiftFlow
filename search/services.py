@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import re
 from datetime import timedelta
 from decimal import Decimal
 
+import httpx
 from django.db.models import Max, Min, OuterRef, Q, QuerySet, Subquery
+from django.core.files.base import ContentFile
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
@@ -21,6 +24,13 @@ logger = logging.getLogger("search.services")
 
 MAX_RESULTS = 20
 HOTLINE_CATALOG_SOURCE = Gift.CATALOG_SOURCE_HOTLINE
+HOTLINE_IMAGE_TIMEOUT = 15
+HOTLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+HOTLINE_IMAGE_ALLOWED_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 
 
 def normalize_search_query(query: str) -> str:
@@ -105,6 +115,78 @@ def build_unique_gift_slug(name: str, *, exclude_id: int | None = None) -> str:
         counter += 1
 
 
+def _extension_from_image_response(response: httpx.Response, image_url: str) -> str:
+    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type in HOTLINE_IMAGE_ALLOWED_TYPES:
+        return HOTLINE_IMAGE_ALLOWED_TYPES[content_type]
+
+    extension = mimetypes.guess_extension(content_type)
+    if extension in HOTLINE_IMAGE_ALLOWED_TYPES.values():
+        return extension
+
+    guessed_type, _ = mimetypes.guess_type(image_url)
+    if guessed_type in HOTLINE_IMAGE_ALLOWED_TYPES:
+        return HOTLINE_IMAGE_ALLOWED_TYPES[guessed_type]
+
+    return ".jpg"
+
+
+def cache_hotline_gift_image(gift: Gift, image_url: str | None) -> bool:
+    if not image_url or gift.image:
+        return False
+
+    try:
+        with httpx.Client(timeout=HOTLINE_IMAGE_TIMEOUT, follow_redirects=True) as client:
+            response = client.get(image_url)
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "[hotline] failed to download gift image gift=%s url=%s error=%s",
+            gift.id or gift.source_product_id,
+            image_url,
+            exc,
+        )
+        return False
+
+    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type and content_type not in HOTLINE_IMAGE_ALLOWED_TYPES:
+        logger.warning(
+            "[hotline] skipped unsupported gift image type gift=%s url=%s content_type=%s",
+            gift.id or gift.source_product_id,
+            image_url,
+            content_type,
+        )
+        return False
+
+    content = response.content
+    if not content or len(content) > HOTLINE_IMAGE_MAX_BYTES:
+        logger.warning(
+            "[hotline] skipped invalid gift image size gift=%s url=%s size=%d",
+            gift.id or gift.source_product_id,
+            image_url,
+            len(content),
+        )
+        return False
+
+    source_product_id = gift.source_product_id or "unknown"
+    extension = _extension_from_image_response(response, image_url)
+    filename = f"hotline/{source_product_id}{extension}"
+    try:
+        gift.image.save(filename, ContentFile(content), save=False)
+    except Exception as exc:
+        logger.warning(
+            "[hotline] failed to store gift image gift=%s url=%s error=%s",
+            gift.id or gift.source_product_id,
+            image_url,
+            exc,
+        )
+        gift.image = ""
+        return False
+
+    logger.info("[hotline] cached gift image gift=%s file=%s", gift.id, gift.image.name)
+    return True
+
+
 def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, bool, bool]:
     category = ensure_hotline_category(seed)
     source_product_id = str(summary.external_product_id).strip()
@@ -163,8 +245,12 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
             changed_fields.append(field)
 
     if created:
+        cache_hotline_gift_image(gift, summary.image_url)
         gift.save()
         return gift, True, True
+
+    if cache_hotline_gift_image(gift, summary.image_url):
+        changed_fields.append("image")
 
     if changed_fields:
         gift.save(update_fields=sorted(set(changed_fields + ["updated_at"])))

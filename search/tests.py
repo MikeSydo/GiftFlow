@@ -1,17 +1,24 @@
 from django.contrib import admin
+from django.core.files.storage import default_storage
 from django.test import TestCase, Client, RequestFactory
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from decimal import Decimal
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+
+import httpx
 
 from gifts.models import Gift, Category, Tag
 from shops.models import PriceHistory, ProductLink, Shop
 
-from .hotline import HotlineAdapter, HotlineMerchantOffer
+from .hotline import HotlineAdapter, HotlineMerchantOffer, HotlineOffer
 from .admin import IngestionRunAdmin
 from .models import IngestionRun
+from .seeds import HotlineSeed
+from .services import upsert_hotline_gift_from_summary
 from .tasks import refresh_hotline_product
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
@@ -573,6 +580,89 @@ class HotlineProductOfferParserTestCase(TestCase):
         self.assertEqual(offers[0].seller_url, "https://gro.ua")
         self.assertEqual(offers[0].original_price, Decimal("21395"))
         self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
+
+
+class HotlineGiftImageCacheTestCase(TestCase):
+    @staticmethod
+    def _storage_settings(destination_root):
+        return {
+            "default": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {
+                    "location": destination_root,
+                    "base_url": "/uploaded-media/",
+                },
+            },
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            },
+        }
+
+    @staticmethod
+    def _seed():
+        return HotlineSeed(
+            key="gaming-gamepads",
+            query="gamepad",
+            category_slug="gaming",
+            category_name="Gaming",
+        )
+
+    @staticmethod
+    def _summary(image_url="https://hotline.ua/img/gamepad.jpg"):
+        return HotlineOffer(
+            external_product_id="659422",
+            external_offer_id="hotline-product-659422",
+            title="Gamepad Xbox Wireless",
+            product_url="https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/659422/",
+            image_url=image_url,
+            price=Decimal("2199"),
+            original_price=Decimal("2599"),
+        )
+
+    @patch("search.services.httpx.Client")
+    def test_upsert_hotline_gift_caches_image_in_default_storage(self, mocked_client):
+        response = Mock()
+        response.headers = {"content-type": "image/jpeg"}
+        response.content = b"jpeg-bytes"
+        response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.return_value = response
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                gift, created, changed = upsert_hotline_gift_from_summary(
+                    self._seed(),
+                    self._summary(),
+                )
+
+                self.assertTrue(created)
+                self.assertTrue(changed)
+                self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
+                self.assertEqual(gift.image.name, "gifts/hotline/659422.jpg")
+                self.assertTrue(default_storage.exists(gift.image.name))
+                with default_storage.open(gift.image.name, "rb") as cached_file:
+                    self.assertEqual(cached_file.read(), b"jpeg-bytes")
+
+        mocked_client.return_value.__enter__.return_value.get.assert_called_once_with(
+            "https://hotline.ua/img/gamepad.jpg",
+        )
+
+    @patch("search.services.httpx.Client")
+    def test_upsert_hotline_gift_keeps_image_url_when_cache_download_fails(self, mocked_client):
+        mocked_client.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError(
+            "network failed",
+        )
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                gift, created, changed = upsert_hotline_gift_from_summary(
+                    self._seed(),
+                    self._summary(),
+                )
+
+        self.assertTrue(created)
+        self.assertTrue(changed)
+        self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
+        self.assertFalse(gift.image)
 
 
 class HotlineProductRefreshTaskTestCase(TestCase):
