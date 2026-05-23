@@ -1,5 +1,5 @@
 from django.db.models import Prefetch
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from shops.models import ProductLink
 
@@ -13,9 +13,56 @@ def _top_level_categories():
     )
 
 
-def category_detail(request, slug):
-    """List all active gifts belonging to the given category."""
-    category = get_object_or_404(Category, slug=slug, is_active=True)
+def parent_category_detail(request, parent_slug):
+    """List active gifts from all subcategories under a top-level category."""
+    category = get_object_or_404(
+        Category,
+        slug=parent_slug,
+        parent__isnull=True,
+        is_active=True,
+    )
+
+    gifts = (
+        Gift.objects.filter(
+            is_active=True,
+            category__parent=category,
+        )
+        .select_related("category")
+        .prefetch_related("tags")
+        .order_by("-popularity_score", "-created_at")
+    )
+    subcategories = category.subcategories.filter(is_active=True).order_by(
+        "order",
+        "name",
+    )
+
+    return render(
+        request,
+        "gifts/category.html",
+        {
+            "category": category,
+            "gifts": gifts,
+            "subcategories": subcategories,
+            "all_categories": _top_level_categories(),
+            "current_top_category": category,
+        },
+    )
+
+
+def subcategory_detail(request, parent_slug, subcategory_slug):
+    """List all active gifts belonging to a specific subcategory."""
+    parent = get_object_or_404(
+        Category,
+        slug=parent_slug,
+        parent__isnull=True,
+        is_active=True,
+    )
+    category = get_object_or_404(
+        Category,
+        slug=subcategory_slug,
+        parent=parent,
+        is_active=True,
+    )
 
     gifts = (
         Gift.objects.filter(is_active=True, category=category)
@@ -29,10 +76,21 @@ def category_detail(request, slug):
         "gifts/category.html",
         {
             "category": category,
+            "parent_category": parent,
             "gifts": gifts,
+            "subcategories": parent.subcategories.filter(is_active=True).order_by(
+                "order",
+                "name",
+            ),
             "all_categories": _top_level_categories(),
+            "current_top_category": parent,
         },
     )
+
+
+def legacy_category_redirect(request, slug):
+    category = get_object_or_404(Category.objects.select_related("parent"), slug=slug, is_active=True)
+    return redirect(category.get_absolute_url(), permanent=True)
 
 
 def gift_detail(request, slug):
@@ -57,5 +115,6 @@ def gift_detail(request, slug):
             "gift": gift,
             "offers": offers,
             "all_categories": _top_level_categories(),
+            "current_top_category": gift.category.parent if gift.category and gift.category.parent_id else gift.category,
         },
     )

@@ -16,9 +16,12 @@ def gift_search(request):
     """
 
     categories = (
-        Category.objects.filter(is_active=True, parent__isnull=True).order_by(
+        Category.objects.filter(is_active=True, parent__isnull=False).order_by(
+            "parent__order",
+            "parent__name",
             "order", "name"
         )
+        .select_related("parent")
     )
 
     occasion_tags = Tag.objects.filter(tag_type="O").order_by("name")

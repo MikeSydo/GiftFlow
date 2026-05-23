@@ -1,5 +1,6 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.urls import reverse
 from django.utils.text import slugify
 
 
@@ -24,6 +25,20 @@ class Category(models.Model):
 
     def __str__(self):
         return self.name
+
+    def get_absolute_url(self):
+        if self.parent_id and self.parent:
+            return reverse(
+                "category_subcategory_detail",
+                kwargs={
+                    "parent_slug": self.parent.slug,
+                    "subcategory_slug": self.slug,
+                },
+            )
+        return reverse(
+            "category_parent_detail",
+            kwargs={"parent_slug": self.slug},
+        )
 
     def save(self, *args, **kwargs):
         if not self.slug:

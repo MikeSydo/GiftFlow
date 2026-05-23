@@ -37,7 +37,7 @@
           <div class="catalog-tabs" id="catalogTabs">
             {% for item in catalog_data %}
             <a class="catalog-tab {% if forloop.first %}catalog-tab--active{% endif %}"
-              href="{% url 'gifts:category_detail' item.category.slug %}" data-tab="{{ forloop.counter0 }}">
+              href="{{ item.category.get_absolute_url }}" data-tab="{{ forloop.counter0 }}">
               {{ item.category.name }}
             </a>
             {% empty %}
@@ -50,7 +50,7 @@
             <div class="catalog-panel {% if forloop.first %}catalog-panel--active{% endif %}"
               data-panel="{{ forloop.counter0 }}">
               {% for gift in item.gifts %}
-              <a href="#" class="catalog-card">
+              <a href="{% url 'gifts:gift_detail' gift.slug %}" class="catalog-card">
                 {% if gift.image %}
                 <img src="{{ gift.image.url }}" alt="{{ gift.name }}" class="catalog-card__img" />
                 {% else %}
@@ -130,7 +130,7 @@
               {% if gift.min_price %}
               <span class="featured-card__price">від {{ gift.min_price }} ₴</span>
               {% endif %}
-              <a href="#" class="featured-card__link">Переглянути -></a>
+              <a href="{% url 'gifts:gift_detail' gift.slug %}" class="featured-card__link">Переглянути -></a>
             </div>
           </div>
         </article>
@@ -169,7 +169,7 @@
               {% if gift.min_price %}
               <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
               {% endif %}
-              <a href="#" class="gift-card__link">→</a>
+              <a href="{% url 'gifts:gift_detail' gift.slug %}" class="gift-card__link">→</a>
             </div>
           </div>
         </article>
@@ -177,7 +177,7 @@
       </div>
 
       <div class="section-cta">
-        <a href="{% url 'gifts:category_detail' item.category.slug %}" class="btn-more">
+        <a href="{{ item.category.get_absolute_url }}" class="btn-more">
           Всі подарунки в категорії {{ item.category.name }}
         </a>
       </div>
@@ -202,7 +202,7 @@
           <h4 class="footer__heading">Каталог</h4>
           <ul class="footer__links">
             {% for item in catalog_data %}
-            <li><a href="#">{{ item.category.name }}</a></li>
+            <li><a href="{{ item.category.get_absolute_url }}">{{ item.category.name }}</a></li>
             {% empty %}
             <li><a href="#">Всі подарунки</a></li>
             {% endfor %}

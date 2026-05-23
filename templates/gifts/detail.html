@@ -257,8 +257,8 @@
                 <div class="catalog-dropdown" id="catalogDropdown">
                     <div class="catalog-tabs" id="catalogTabs">
                         {% for cat in all_categories %}
-                        <a class="catalog-tab {% if gift.category and cat.id == gift.category_id %}catalog-tab--active{% endif %}"
-                            href="{% url 'gifts:category_detail' cat.slug %}">
+                        <a class="catalog-tab {% if current_top_category and cat.id == current_top_category.id %}catalog-tab--active{% endif %}"
+                            href="{{ cat.get_absolute_url }}">
                             {{ cat.name }}
                         </a>
                         {% empty %}
@@ -279,7 +279,11 @@
             <a href="{% url 'home:home' %}">Home</a>
             <span class="breadcrumb__sep">›</span>
             {% if gift.category %}
-            <a href="{% url 'gifts:category_detail' gift.category.slug %}">{{ gift.category.name }}</a>
+            {% if gift.category.parent %}
+            <a href="{{ gift.category.parent.get_absolute_url }}">{{ gift.category.parent.name }}</a>
+            <span class="breadcrumb__sep">вЂє</span>
+            {% endif %}
+            <a href="{{ gift.category.get_absolute_url }}">{{ gift.category.name }}</a>
             <span class="breadcrumb__sep">›</span>
             {% endif %}
             <span>{{ gift.name }}</span>

@@ -48,19 +48,10 @@ class FakeS3Storage:
         self.deleted_names.append(name)
 
 
-class SeedGiftCategoriesCommandTestCase(TestCase):
-    def test_seed_command_is_idempotent(self):
-        output = StringIO()
-
-        call_command("seed_gift_categories", stdout=output)
-        first_count = Category.objects.count()
-        call_command("seed_gift_categories", stdout=output)
-        second_count = Category.objects.count()
-
-        self.assertEqual(first_count, 16)
-        self.assertEqual(second_count, 16)
-        self.assertTrue(Category.objects.filter(slug="electronics").exists())
-        self.assertTrue(Category.objects.filter(slug="home-kitchen").exists())
+class ObsoleteGiftCategorySeedCommandTestCase(TestCase):
+    def test_seed_gift_categories_command_is_removed(self):
+        with self.assertRaises(CommandError):
+            call_command("seed_gift_categories")
 
 
 class SeedGiftTagsCommandTestCase(TestCase):
@@ -354,9 +345,15 @@ class GiftDetailViewTestCase(TestCase):
         self.cache_delay_patcher.start()
         self.addCleanup(self.cache_delay_patcher.stop)
 
-        self.category = Category.objects.create(
+        self.parent_category = Category.objects.create(
             name="Gaming",
             slug="gaming",
+            is_active=True,
+        )
+        self.category = Category.objects.create(
+            name="Handheld consoles",
+            slug="handheld-consoles",
+            parent=self.parent_category,
             is_active=True,
         )
         self.gift = Gift.objects.create(
@@ -443,6 +440,57 @@ class GiftDetailViewTestCase(TestCase):
 
         self.assertContains(response, "offer-card__logo")
         self.assertContains(response, "/media/shops/static/images/hotline/fast-shop.png")
+
+
+class CategoryNestedURLTestCase(TestCase):
+    def setUp(self):
+        self.parent = Category.objects.create(name="Gaming", slug="gaming")
+        self.subcategory = Category.objects.create(
+            name="Gamepads",
+            slug="gamepads",
+            parent=self.parent,
+        )
+        self.gift = Gift.objects.create(
+            name="Controller",
+            slug="controller",
+            category=self.subcategory,
+            gender="U",
+            age_min=0,
+            age_max=100,
+            is_active=True,
+        )
+
+    def test_parent_category_url_lists_subcategory_gifts(self):
+        response = self.client.get(
+            reverse("category_parent_detail", kwargs={"parent_slug": self.parent.slug}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.gift.name)
+        self.assertEqual(response.context["current_top_category"], self.parent)
+
+    def test_subcategory_url_lists_only_subcategory_gifts(self):
+        response = self.client.get(
+            reverse(
+                "category_subcategory_detail",
+                kwargs={
+                    "parent_slug": self.parent.slug,
+                    "subcategory_slug": self.subcategory.slug,
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.gift.name)
+        self.assertEqual(response.context["parent_category"], self.parent)
+
+    def test_legacy_category_url_redirects_to_nested_url(self):
+        response = self.client.get(
+            reverse("gifts:category_detail", args=[self.subcategory.slug]),
+        )
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], self.subcategory.get_absolute_url())
 
 
 class GiftAdminActionTestCase(TestCase):

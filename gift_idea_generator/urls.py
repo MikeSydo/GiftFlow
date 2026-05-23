@@ -18,10 +18,21 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from gifts import views as gift_views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('home.urls')),
+    path(
+        'categories/<slug:parent_slug>/<slug:subcategory_slug>/',
+        gift_views.subcategory_detail,
+        name='category_subcategory_detail',
+    ),
+    path(
+        'categories/<slug:parent_slug>/',
+        gift_views.parent_category_detail,
+        name='category_parent_detail',
+    ),
     path('search/', include('search.urls')),
     path('gifts/', include('gifts.urls')),
     path('api/shops/', include('shops.urls')),
