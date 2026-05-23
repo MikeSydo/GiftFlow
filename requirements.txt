@@ -14,6 +14,4 @@ django-storages[s3]==1.14.6
 pillow==12.1.0
 celery[redis]==5.4.0
 httpx==0.28.1
-beautifulsoup4==4.13.3
-playwright==1.49.1
 rapidfuzz>=3.11.0
