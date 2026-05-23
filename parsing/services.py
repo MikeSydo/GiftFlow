@@ -34,10 +34,8 @@ HOTLINE_IMAGE_ALLOWED_TYPES = {
     "image/x-icon": ".ico",
     "image/vnd.microsoft.icon": ".ico",
 }
-HOTLINE_OG_IMAGE_PATTERN = re.compile(
-    r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-    re.I,
-)
+HOTLINE_META_TAG_PATTERN = re.compile(r"<meta\b[^>]*>", re.I)
+HOTLINE_META_ATTR_PATTERN = re.compile(r'([:\w-]+)=["\']([^"\']*)["\']', re.I)
 HOTLINE_TX_PLACEHOLDER_IMAGE_PATTERN = re.compile(
     r"^(?P<prefix>https://hotline\.ua/img/tx/\d+/\d+)0(?P<suffix>\.[a-z0-9]+)$",
     re.I,
@@ -232,9 +230,9 @@ def resolve_hotline_product_image_url(product_url: str, fallback_url: str | None
             errors.append(f"{candidate_url}: {exc}")
             continue
 
-        match = HOTLINE_OG_IMAGE_PATTERN.search(response.text)
-        if match:
-            return unescape(match.group(1))
+        image_url = extract_hotline_og_image_url(response.text)
+        if image_url:
+            return image_url
 
     if errors:
         logger.warning(
@@ -243,6 +241,17 @@ def resolve_hotline_product_image_url(product_url: str, fallback_url: str | None
             "; ".join(errors),
         )
     return fallback_url
+
+
+def extract_hotline_og_image_url(html: str) -> str | None:
+    for tag in HOTLINE_META_TAG_PATTERN.findall(html):
+        attrs = {
+            key.lower(): unescape(value)
+            for key, value in HOTLINE_META_ATTR_PATTERN.findall(tag)
+        }
+        if attrs.get("property") == "og:image" and attrs.get("content"):
+            return attrs["content"]
+    return None
 
 
 def _hotline_image_url_candidates(image_url: str) -> list[str]:

@@ -25,6 +25,7 @@ from .seed_catalog import import_hotline_seed_templates
 from .seeds import HOTLINE_SEEDS, HotlineSeed
 from .services import (
     cache_shop_logo,
+    extract_hotline_og_image_url,
     resolve_hotline_product_image_url,
     upsert_hotline_gift_from_summary,
 )
@@ -641,6 +642,14 @@ class HotlineGiftImageCacheTestCase(TestCase):
         )
         mocked_client.return_value.__enter__.return_value.get.assert_any_call(
             "https://hotline.ua/ua/computer-gejmpady-dzhojstiki-ruli/logitech-gamepad-f310/",
+        )
+
+    def test_extract_hotline_og_image_url_accepts_content_before_property(self):
+        html = '<meta content="https://hotline.ua/img/real.jpg" property="og:image">'
+
+        self.assertEqual(
+            extract_hotline_og_image_url(html),
+            "https://hotline.ua/img/real.jpg",
         )
 
     @patch("parsing.services.httpx.Client")
