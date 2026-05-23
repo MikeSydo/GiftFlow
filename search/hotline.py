@@ -46,6 +46,7 @@ class HotlineMerchantOffer:
     seller_external_id: str | None = None
     seller_url: str | None = None
     image_url: str | None = None
+    seller_logo_url: str | None = None
 
 
 class HotlineAdapter:
@@ -198,6 +199,7 @@ class HotlineAdapter:
         firm_id = self._match(r"firmId:(\d+)", chunk)
         seller_name = self._match_string(r'firmTitle:"((?:\\.|[^"])*)"', chunk)
         website = self._match_string(r'website:"((?:\\.|[^"])*)"', chunk)
+        logo_url = self._match_string(r'officialFirmImage:"((?:\\.|[^"])*)"', chunk)
 
         if not offer_id or not conversion_url or not price_raw or not seller_name:
             return None
@@ -217,6 +219,7 @@ class HotlineAdapter:
             seller_name=seller_name,
             seller_external_id=firm_id,
             seller_url=self._make_external_website_url(website) if website else None,
+            seller_logo_url=self._make_absolute_url(logo_url) if logo_url else None,
         )
 
     def _extract_image_url(self, chunk: str) -> str | None:
