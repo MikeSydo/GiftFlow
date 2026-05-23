@@ -3,7 +3,7 @@ from __future__ import annotations
 from gifts.models import Category
 
 from .models import HotlineSeed
-from .seeds import HOTLINE_SEED_TEMPLATES
+from .seeds import HOTLINE_SEED_TEMPLATES, OBSOLETE_HOTLINE_SEED_KEYS
 
 
 def import_hotline_category_templates() -> tuple[int, int]:
@@ -69,6 +69,9 @@ def import_hotline_category_templates() -> tuple[int, int]:
             if changed_fields:
                 seed.save(update_fields=changed_fields + ["updated_at"])
                 updated += 1
+
+    if OBSOLETE_HOTLINE_SEED_KEYS:
+        HotlineSeed.objects.filter(key__in=OBSOLETE_HOTLINE_SEED_KEYS).update(is_active=False)
     return created, updated
 
 

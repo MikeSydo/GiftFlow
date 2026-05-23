@@ -23,7 +23,11 @@ from .admin import HotlineSeedAdmin, IngestionRunAdmin
 from .models import HotlineSeed as DbHotlineSeed, IngestionRun
 from .seed_catalog import import_hotline_seed_templates
 from .seeds import HOTLINE_SEEDS, HotlineSeed
-from .services import cache_shop_logo, resolve_hotline_product_image_url, upsert_hotline_gift_from_summary
+from .services import (
+    cache_shop_logo,
+    resolve_hotline_product_image_url,
+    upsert_hotline_gift_from_summary,
+)
 from .tasks import queue_missing_hotline_seed_refreshes, refresh_hotline_product
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
@@ -220,6 +224,8 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         self.assertEqual(second_count, len(HOTLINE_SEEDS))
         self.assertTrue(Category.objects.filter(parent__isnull=True).exists())
         self.assertTrue(Category.objects.filter(parent__isnull=False).exists())
+        self.assertTrue(Category.objects.filter(name="Смартфони, Смарт-годинники").exists())
+        self.assertTrue(Category.objects.filter(name="Смартфони та мобільні телефони").exists())
 
     def test_seed_hotline_seeds_command_is_removed(self):
         with self.assertRaises(CommandError):
