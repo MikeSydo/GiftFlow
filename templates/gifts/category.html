@@ -199,6 +199,63 @@
             margin: 0 .4rem;
             opacity: .5;
         }
+
+        .subcategory-strip {
+            padding: 0 0 2rem;
+        }
+
+        .subcategory-list {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: .75rem;
+        }
+
+        .subcategory-link {
+            display: inline-flex;
+            align-items: center;
+            min-height: 40px;
+            padding: .55rem 1rem;
+            border: 1px solid var(--clr-border, #e8e0d4);
+            border-radius: 999px;
+            background: #fff;
+            color: #6b5f54;
+            font-size: .9rem;
+            font-weight: 600;
+            line-height: 1.2;
+            transition: background .2s ease, border-color .2s ease, color .2s ease;
+        }
+
+        .subcategory-link:hover,
+        .subcategory-link--active {
+            border-color: var(--clr-accent, #7a2e3f);
+            background: var(--clr-accent, #7a2e3f);
+            color: #fff;
+        }
+
+        .catalog-subcategory-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: .5rem;
+        }
+
+        .catalog-subcategory-link {
+            display: flex;
+            align-items: center;
+            min-height: 38px;
+            padding: .55rem .75rem;
+            border-radius: .5rem;
+            color: var(--clr-text-mid, #6b5f54);
+            font-size: .86rem;
+            font-weight: 600;
+            line-height: 1.25;
+            transition: background .2s ease, color .2s ease;
+        }
+
+        .catalog-subcategory-link:hover {
+            background: var(--clr-accent-pale, #f5eced);
+            color: var(--clr-accent, #7a2e3f);
+        }
     </style>
 </head>
 
@@ -224,11 +281,30 @@
                     <div class="catalog-tabs" id="catalogTabs">
                         {% for cat in all_categories %}
                         <a class="catalog-tab {% if current_top_category and cat.id == current_top_category.id %}catalog-tab--active{% endif %}"
-                            href="{{ cat.get_absolute_url }}">
+                            href="{{ cat.get_absolute_url }}" data-tab="{{ forloop.counter0 }}">
                             {{ cat.name }}
                         </a>
                         {% empty %}
                         <span class="catalog-empty">Категорії ще не додані</span>
+                        {% endfor %}
+                    </div>
+
+                    <div class="catalog-panels" id="catalogPanels">
+                        {% for cat in all_categories %}
+                        <div class="catalog-panel {% if current_top_category and cat.id == current_top_category.id %}catalog-panel--active{% endif %}"
+                            data-panel="{{ forloop.counter0 }}">
+                            <div class="catalog-subcategory-grid">
+                                {% for subcategory in cat.subcategories.all %}
+                                <a href="{{ subcategory.get_absolute_url }}" class="catalog-subcategory-link">
+                                    {{ subcategory.name }}
+                                </a>
+                                {% empty %}
+                                <a href="{{ cat.get_absolute_url }}" class="catalog-subcategory-link">
+                                    Всі товари
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
                         {% endfor %}
                     </div>
                 </div>
@@ -268,6 +344,21 @@
         {% endif %}
         <p class="category-hero__count">{{ gifts.count }} подарунк{% if gifts.count == 1 %}ій{% else %}ів{% endif %}</p>
     </section>
+
+    {% if subcategories %}
+    <section class="subcategory-strip">
+        <div class="container">
+            <div class="subcategory-list">
+                {% for subcategory in subcategories %}
+                <a class="subcategory-link {% if category.id == subcategory.id %}subcategory-link--active{% endif %}"
+                    href="{{ subcategory.get_absolute_url }}">
+                    {{ subcategory.name }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
 
     <!-- Gift grid -->
     <main class="container">

@@ -239,8 +239,26 @@ ul {
 
 .catalog-panel--active {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
+}
+
+.catalog-subcategory-link {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--clr-text-mid);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  transition: background var(--transition), color var(--transition);
+}
+
+.catalog-subcategory-link:hover {
+  background: var(--clr-accent-pale);
+  color: var(--clr-accent);
 }
 
 .catalog-card {

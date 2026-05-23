@@ -60,6 +60,8 @@
         if (!tab) return;
 
         const idx = tab.dataset.tab;
+        if (!idx) return;
+        e.preventDefault();
 
         // tabs
         catalogTabs.querySelectorAll(".catalog-tab").forEach((t) => {

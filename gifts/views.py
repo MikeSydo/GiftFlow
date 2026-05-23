@@ -7,9 +7,18 @@ from .models import Category, Gift
 
 
 def _top_level_categories():
-    return Category.objects.filter(is_active=True, parent__isnull=True).order_by(
-        "order",
-        "name",
+    return (
+        Category.objects.filter(is_active=True, parent__isnull=True)
+        .prefetch_related(
+            Prefetch(
+                "subcategories",
+                queryset=Category.objects.filter(is_active=True).order_by("order", "name"),
+            )
+        )
+        .order_by(
+            "order",
+            "name",
+        )
     )
 
 

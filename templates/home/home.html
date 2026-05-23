@@ -49,6 +49,11 @@
             {% for item in catalog_data %}
             <div class="catalog-panel {% if forloop.first %}catalog-panel--active{% endif %}"
               data-panel="{{ forloop.counter0 }}">
+              {% for subcategory in item.subcategories %}
+              <a href="{{ subcategory.get_absolute_url }}" class="catalog-subcategory-link">
+                {{ subcategory.name }}
+              </a>
+              {% empty %}
               {% for gift in item.gifts %}
               <a href="{% url 'gifts:gift_detail' gift.slug %}" class="catalog-card">
                 {% if gift.image %}
@@ -63,6 +68,7 @@
                   {% endif %}
                 </div>
               </a>
+              {% endfor %}
               {% endfor %}
             </div>
             {% endfor %}
