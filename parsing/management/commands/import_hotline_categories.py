@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
-from search.seed_catalog import import_hotline_category_templates
-from search.seeds import HOTLINE_SEED_TEMPLATES
+from parsing.seed_catalog import import_hotline_category_templates
+from parsing.seeds import HOTLINE_SEED_TEMPLATES
 
 
 class Command(BaseCommand):

@@ -33,7 +33,6 @@ urlpatterns = [
         gift_views.parent_category_detail,
         name='category_parent_detail',
     ),
-    path('search/', include('search.urls')),
     path('gifts/', include('gifts.urls')),
     path('api/shops/', include('shops.urls')),
 ]

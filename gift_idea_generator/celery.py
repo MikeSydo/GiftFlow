@@ -15,7 +15,7 @@ app.autodiscover_tasks()
 def queue_cold_start_bootstrap(**kwargs):
     try:
         app.send_task(
-            "search.tasks.enqueue_missing_hotline_seed_refreshes",
+            "parsing.tasks.enqueue_missing_hotline_seed_refreshes",
             queue="discovery",
         )
     except Exception as exc:

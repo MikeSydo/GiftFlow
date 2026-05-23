@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from gifts.models import Gift
-from search.services import cache_hotline_gift_image
+from parsing.services import cache_hotline_gift_image
 
 
 class Command(BaseCommand):

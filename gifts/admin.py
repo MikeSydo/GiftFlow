@@ -3,7 +3,7 @@ from django.contrib import messages
 from django.utils.safestring import mark_safe
 
 from .models import Category, Tag, Gift, GiftImage
-from search.tasks import queue_hotline_product_refresh
+from parsing.tasks import queue_hotline_product_refresh
 
 class GiftImageInline(admin.TabularInline):
     model = GiftImage

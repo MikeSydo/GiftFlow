@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from search.tasks import active_hotline_seeds, queue_hotline_seed_refresh
+from parsing.tasks import active_hotline_seeds, queue_hotline_seed_refresh
 
 
 class Command(BaseCommand):

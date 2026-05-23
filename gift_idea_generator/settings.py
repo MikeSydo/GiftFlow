@@ -186,7 +186,7 @@ INSTALLED_APPS = [
     'gifts',
     'shops',
     'home',
-    'search',
+    'parsing.apps.ParsingConfig',
 ]
 
 MIDDLEWARE = [
@@ -288,11 +288,11 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ROUTES = {
-    'search.tasks.enqueue_missing_hotline_seed_refreshes': {'queue': 'discovery'},
-    'search.tasks.enqueue_hotline_seed_refreshes': {'queue': 'discovery'},
-    'search.tasks.enqueue_stale_hotline_product_refreshes': {'queue': 'prices'},
-    'search.tasks.refresh_hotline_seed': {'queue': 'discovery'},
-    'search.tasks.refresh_hotline_product': {'queue': 'prices'},
+    'parsing.tasks.enqueue_missing_hotline_seed_refreshes': {'queue': 'discovery'},
+    'parsing.tasks.enqueue_hotline_seed_refreshes': {'queue': 'discovery'},
+    'parsing.tasks.enqueue_stale_hotline_product_refreshes': {'queue': 'prices'},
+    'parsing.tasks.refresh_hotline_seed': {'queue': 'discovery'},
+    'parsing.tasks.refresh_hotline_product': {'queue': 'prices'},
     'shops.tasks.update_gift_price_cache': {'queue': 'prices'},
     'shops.tasks.verify_product_link': {'queue': 'verification'},
     'shops.tasks.increment_shop_click': {'queue': 'prices'},
@@ -301,15 +301,15 @@ CELERY_TASK_ROUTES = {
 
 CELERY_BEAT_SCHEDULE = {
     "hotline-cold-start-bootstrap-guard": {
-        "task": "search.tasks.enqueue_missing_hotline_seed_refreshes",
+        "task": "parsing.tasks.enqueue_missing_hotline_seed_refreshes",
         "schedule": timedelta(minutes=5),
     },
     "hotline-seed-refresh": {
-        "task": "search.tasks.enqueue_hotline_seed_refreshes",
+        "task": "parsing.tasks.enqueue_hotline_seed_refreshes",
         "schedule": timedelta(hours=6),
     },
     "hotline-stale-product-refresh": {
-        "task": "search.tasks.enqueue_stale_hotline_product_refreshes",
+        "task": "parsing.tasks.enqueue_stale_hotline_product_refreshes",
         "schedule": timedelta(hours=1),
         "args": (100,),
     },
@@ -349,17 +349,17 @@ LOGGING = {
             'level': DJANGO_LOG_LEVEL,
             'propagate': False,
         },
-        'search.hotline': {
+        'parsing.hotline': {
             'handlers': ['console', 'scraper_file'],
             'level': DJANGO_LOG_LEVEL,
             'propagate': False,
         },
-        'search.services': {
+        'parsing.services': {
             'handlers': ['console', 'scraper_file'],
             'level': DJANGO_LOG_LEVEL,
             'propagate': False,
         },
-        'search.tasks': {
+        'parsing.tasks': {
             'handlers': ['console', 'scraper_file'],
             'level': DJANGO_LOG_LEVEL,
             'propagate': False,

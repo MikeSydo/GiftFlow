@@ -41,7 +41,7 @@ HOTLINE_SEED_TEMPLATES: tuple[HotlineSeedTemplate, ...] = (
 )
 
 # Backward-compatible name for tests and template import code. Runtime ingestion
-# reads active search.HotlineSeed rows from the database.
+# reads active HotlineSeed rows from the database.
 HotlineSeed = HotlineSeedTemplate
 HOTLINE_SEEDS = HOTLINE_SEED_TEMPLATES
 

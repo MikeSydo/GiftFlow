@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-logger = logging.getLogger("search.hotline")
+logger = logging.getLogger("parsing.hotline")
 
 HOTLINE_BASE_URL = "https://hotline.ua"
 HOTLINE_SEARCH_URL = f"{HOTLINE_BASE_URL}/ua/sr/"

@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 
-from search.services import cache_shop_logo
+from parsing.services import cache_shop_logo
 from shops.models import Shop
 
 

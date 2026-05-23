@@ -21,7 +21,7 @@ from .services import (
     upsert_hotline_gift_from_summary,
 )
 
-logger = logging.getLogger("search.tasks")
+logger = logging.getLogger("parsing.tasks")
 
 
 def active_hotline_seeds():

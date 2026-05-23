@@ -4,14 +4,12 @@ import logging
 import mimetypes
 import re
 from datetime import timedelta
-from decimal import Decimal
 from html import unescape
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from django.db.models import Max, Min, OuterRef, Q, QuerySet, Subquery
 from django.core.files.base import ContentFile
-from django.urls import reverse
+from django.db.models import Max, Min, Q
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -22,9 +20,8 @@ from shops.signals import suppress_productlink_price_cache_updates
 
 from .models import HotlineSeed, IngestionRun
 
-logger = logging.getLogger("search.services")
+logger = logging.getLogger("parsing.services")
 
-MAX_RESULTS = 20
 HOTLINE_CATALOG_SOURCE = Gift.CATALOG_SOURCE_HOTLINE
 HOTLINE_IMAGE_TIMEOUT = 15
 HOTLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
@@ -72,15 +69,6 @@ HOTLINE_KEYWORD_TAG_RULES = (
 
 def normalize_search_query(query: str) -> str:
     return re.sub(r"\s+", " ", (query or "").strip().lower())
-
-
-def extract_request_filters(data) -> dict:
-    filters: dict[str, str] = {}
-    for key in ("category", "gender", "age", "budget_min", "budget_max", "tags"):
-        value = data.get(key)
-        if value not in (None, ""):
-            filters[key] = str(value)
-    return filters
 
 
 def refresh_gift_price_cache(gift_id: int) -> None:
@@ -835,115 +823,3 @@ def sync_hotline_product_offers(gift: Gift, offers: list) -> dict[str, int]:
     }
 
 
-def base_gift_queryset() -> QuerySet[Gift]:
-    best_offer_subquery = ProductLink.objects.filter(
-        gift_id=OuterRef("pk"),
-        in_stock=True,
-    ).order_by("price", "id")
-
-    return (
-        Gift.objects.filter(is_active=True)
-        .select_related("category")
-        .prefetch_related("tags")
-        .annotate(best_offer_id=Subquery(best_offer_subquery.values("id")[:1]))
-    )
-
-
-def apply_gift_filters(qs: QuerySet[Gift], params) -> QuerySet[Gift]:
-    query = normalize_search_query(params.get("q", ""))
-    if query:
-        qs = qs.filter(
-            Q(name__icontains=query)
-            | Q(short_description__icontains=query)
-            | Q(description__icontains=query)
-            | Q(category__name__icontains=query)
-            | Q(tags__name__icontains=query)
-        ).distinct()
-
-    category_id = params.get("category")
-    if category_id and str(category_id).isdigit():
-        qs = qs.filter(category_id=int(category_id))
-
-    gender = params.get("gender")
-    if gender in ("M", "F"):
-        qs = qs.filter(gender__in=(gender, "U"))
-
-    age = params.get("age")
-    if age and str(age).isdigit():
-        age_value = int(age)
-        qs = qs.filter(age_min__lte=age_value, age_max__gte=age_value)
-
-    budget_min = params.get("budget_min")
-    if budget_min:
-        try:
-            qs = qs.filter(min_price__gte=Decimal(str(budget_min)))
-        except Exception:
-            pass
-
-    budget_max = params.get("budget_max")
-    if budget_max:
-        try:
-            qs = qs.filter(min_price__lte=Decimal(str(budget_max)))
-        except Exception:
-            pass
-
-    tag_ids = params.get("tags")
-    if tag_ids:
-        ids = [int(value) for value in str(tag_ids).split(",") if value.isdigit()]
-        if ids:
-            qs = qs.filter(tags__id__in=ids).distinct()
-
-    return qs.order_by("-popularity_score", "-created_at")
-
-
-def serialize_gift_results(qs: QuerySet[Gift], limit: int = MAX_RESULTS) -> tuple[list[dict], int]:
-    limited_gifts = list(qs[:limit])
-    offer_ids = [gift.best_offer_id for gift in limited_gifts if gift.best_offer_id]
-    best_offers = {
-        offer.id: offer
-        for offer in ProductLink.objects.select_related("shop").filter(id__in=offer_ids)
-    }
-
-    results: list[dict] = []
-    for gift in limited_gifts:
-        best_offer = best_offers.get(gift.best_offer_id)
-        results.append(
-            {
-                "id": gift.id,
-                "title": gift.name,
-                "slug": gift.slug,
-                "detail_url": reverse("gifts:gift_detail", args=[gift.slug]),
-                "short_description": gift.short_description or "",
-                "image": (
-                    gift.image.url
-                    if gift.image
-                    else gift.image_url or (best_offer.image_url if best_offer else "")
-                ),
-                "category": gift.category.name if gift.category else "",
-                "min_price": str(gift.min_price or 0),
-                "max_price": str(gift.max_price or gift.min_price or 0),
-                "popularity_score": gift.popularity_score,
-                "tags": [tag.name for tag in gift.tags.all()],
-                "best_offer": (
-                    {
-                        "id": best_offer.id,
-                        "shop": best_offer.shop.name,
-                        "seller_name": best_offer.seller_name or best_offer.shop.name,
-                        "price": str(best_offer.price),
-                        "original_price": (
-                            str(best_offer.original_price)
-                            if best_offer.original_price
-                            else None
-                        ),
-                        "product_url": best_offer.product_url,
-                        "image_url": best_offer.image_url,
-                        "is_marketplace_offer": best_offer.is_marketplace_offer,
-                    }
-                    if best_offer
-                    else None
-                ),
-                "best_offer_url": best_offer.product_url if best_offer else "",
-            },
-        )
-
-    return results, len(results)
