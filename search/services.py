@@ -114,7 +114,8 @@ def ensure_hotline_category(seed: HotlineSeed) -> Category:
 def assign_hotline_gift_tags(gift: Gift, seed: HotlineSeed, title: str) -> bool:
     seed_default_tags()
     category = ensure_hotline_category(seed)
-    wanted: set[tuple[str, str]] = set(HOTLINE_TAG_RULES.get(category.slug, []))
+    tag_slug = category.parent.slug if category.parent_id and category.parent else category.slug
+    wanted: set[tuple[str, str]] = set(HOTLINE_TAG_RULES.get(tag_slug, []))
     text = normalize_search_query(f"{seed.query} {title}")
     for keywords, tag in HOTLINE_KEYWORD_TAG_RULES:
         if any(keyword in text for keyword in keywords):

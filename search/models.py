@@ -1,10 +1,12 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 
 class HotlineSeed(models.Model):
     key = models.SlugField(max_length=100, unique=True)
-    query = models.CharField(max_length=200)
+    query = models.CharField(max_length=200, blank=True, default="")
+    source_url = models.URLField(max_length=500, blank=True, default="")
     category = models.ForeignKey(
         "gifts.Category",
         on_delete=models.PROTECT,
@@ -31,8 +33,19 @@ class HotlineSeed(models.Model):
     def category_name(self) -> str:
         return self.category.name
 
+    def clean(self):
+        errors = {}
+        if self.is_active:
+            if not self.source_url and not self.query:
+                errors["source_url"] = "Active Hotline sources need a category URL or legacy query."
+            if self.category_id and self.category and self.category.parent_id is None:
+                errors["category"] = "Active Hotline sources must point to a subcategory."
+        if errors:
+            raise ValidationError(errors)
+
     def __str__(self):
-        return f"{self.key}: {self.query}"
+        source = self.source_url or self.query
+        return f"{self.key}: {source}"
 
 
 class IngestionRun(models.Model):

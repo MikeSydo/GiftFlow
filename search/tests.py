@@ -1,6 +1,8 @@
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, Client, RequestFactory
 from django.test import override_settings
 from django.urls import reverse
@@ -486,7 +488,11 @@ class IngestionRunAdminActionTestCase(TestCase):
         self.seed = DbHotlineSeed.objects.create(
             key="gaming-gamepads",
             query="gamepad",
-            category=Category.objects.get_or_create(name="Gaming", slug="gaming")[0],
+            category=Category.objects.get_or_create(
+                name="Gamepads",
+                slug="gaming-gamepads",
+                parent=Category.objects.get_or_create(name="Gaming", slug="gaming")[0],
+            )[0],
             is_active=True,
         )
 
@@ -642,16 +648,39 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         seed.refresh_from_db()
         self.assertFalse(seed.is_active)
 
+    def test_import_hotline_categories_command_is_idempotent(self):
+        output = StringIO()
+
+        call_command("import_hotline_categories", stdout=output)
+        first_count = DbHotlineSeed.objects.count()
+        call_command("import_hotline_categories", stdout=output)
+        second_count = DbHotlineSeed.objects.count()
+
+        self.assertEqual(first_count, len(HOTLINE_SEEDS))
+        self.assertEqual(second_count, len(HOTLINE_SEEDS))
+        self.assertTrue(Category.objects.filter(parent__isnull=True).exists())
+        self.assertTrue(Category.objects.filter(parent__isnull=False).exists())
+
+    def test_seed_hotline_seeds_command_is_removed(self):
+        with self.assertRaises(CommandError):
+            call_command("seed_hotline_seeds")
+
 
 class HotlineSeedAdminActionTestCase(TestCase):
     def setUp(self):
         self.request = RequestFactory().post("/admin/search/hotlineseed/")
         self.model_admin = HotlineSeedAdmin(DbHotlineSeed, admin.site)
         self.model_admin.message_user = Mock()
-        self.category = Category.objects.create(name="Gaming", slug="gaming")
+        self.parent_category = Category.objects.create(name="Gaming", slug="gaming")
+        self.category = Category.objects.create(
+            name="Gamepads",
+            slug="gaming-gamepads",
+            parent=self.parent_category,
+        )
         self.seed = DbHotlineSeed.objects.create(
             key="gaming-gamepads",
             query="gamepad",
+            source_url="https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/",
             category=self.category,
             is_active=True,
         )
@@ -676,7 +705,34 @@ class HotlineSeedAdminActionTestCase(TestCase):
         clone = DbHotlineSeed.objects.get(key="gaming-gamepads-copy")
         self.assertFalse(clone.is_active)
         self.assertEqual(clone.query, self.seed.query)
+        self.assertEqual(clone.source_url, self.seed.source_url)
         self.assertEqual(clone.category, self.seed.category)
+
+    def test_active_seed_requires_subcategory(self):
+        seed = DbHotlineSeed(
+            key="top-level-gaming",
+            source_url="https://hotline.ua/ua/game/",
+            category=self.parent_category,
+            is_active=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            seed.full_clean()
+
+    @patch("search.admin.queue_hotline_seed_refresh")
+    def test_save_model_queues_active_subcategory_source_after_commit(self, mocked_queue):
+        seed = DbHotlineSeed(
+            key="new-gamepads",
+            source_url="https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/",
+            category=self.category,
+            is_active=True,
+        )
+        form = Mock(changed_data=["source_url"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.model_admin.save_model(self.request, seed, form, change=False)
+
+        mocked_queue.assert_called_once_with(seed.pk)
 
 
 class HotlineProductOfferParserTestCase(TestCase):
@@ -694,6 +750,32 @@ class HotlineProductOfferParserTestCase(TestCase):
             "https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
         )
         self.assertEqual(offers[0].image_url, "https://hotline.ua/img/steam-deck.jpg")
+
+    def test_search_category_fetches_pages_until_no_new_products(self):
+        html = (FIXTURE_DIR / "hotline_search_nuxt.html").read_text(encoding="utf-8")
+        empty_response = Mock(text="<html><script>window.__NUXT__={}</script></html>")
+        empty_response.raise_for_status.return_value = None
+        first_response = Mock(text=html)
+        first_response.raise_for_status.return_value = None
+        second_response = Mock(text=html)
+        second_response.raise_for_status.return_value = None
+        client = Mock()
+        client.get.side_effect = [first_response, second_response, empty_response]
+
+        offers = HotlineAdapter(client=client).search_category(
+            "https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/",
+            max_pages=3,
+        )
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(
+            client.get.call_args_list[0].args[0],
+            "https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/",
+        )
+        self.assertEqual(
+            client.get.call_args_list[1].args[0],
+            "https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/?p=2",
+        )
         self.assertEqual(offers[0].price, Decimal("19499"))
         self.assertEqual(offers[0].original_price, Decimal("21395"))
 

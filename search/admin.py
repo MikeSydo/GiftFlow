@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib import messages
+from django.db import transaction
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.http import urlencode
@@ -7,7 +8,7 @@ from django.utils.http import urlencode
 from gifts.models import Gift
 
 from .models import HotlineSeed, IngestionRun
-from .seed_catalog import import_hotline_seed_templates
+from .seed_catalog import import_hotline_category_templates
 from .tasks import active_hotline_seeds, queue_hotline_product_refresh, queue_hotline_seed_refresh
 
 
@@ -40,6 +41,7 @@ def queue_run_again(run: IngestionRun) -> bool:
 class HotlineSeedAdmin(admin.ModelAdmin):
     list_display = [
         "key",
+        "source_url",
         "query",
         "category",
         "is_active",
@@ -48,7 +50,7 @@ class HotlineSeedAdmin(admin.ModelAdmin):
         "related_runs_link",
     ]
     list_filter = ["is_active", "category"]
-    search_fields = ["key", "query", "category__name"]
+    search_fields = ["key", "query", "source_url", "category__name"]
     autocomplete_fields = ["category"]
     readonly_fields = ["last_queued_at", "created_at", "updated_at", "related_runs_link"]
     list_editable = ["is_active", "priority"]
@@ -58,21 +60,30 @@ class HotlineSeedAdmin(admin.ModelAdmin):
         "make_active",
         "make_inactive",
         "clone_selected_seeds",
-        "import_default_seed_templates",
+        "import_default_category_templates",
     ]
 
     fieldsets = (
-        (None, {"fields": ("key", "query", "category")}),
+        (None, {"fields": ("key", "source_url", "query", "category")}),
         ("Scheduling", {"fields": ("is_active", "priority", "last_queued_at")}),
         ("History", {"fields": ("related_runs_link", "created_at", "updated_at")}),
     )
+
+    def save_model(self, request, obj, form, change):
+        should_queue = obj.is_active and (
+            not change
+            or any(field in form.changed_data for field in ("is_active", "source_url", "query", "category"))
+        )
+        super().save_model(request, obj, form, change)
+        if should_queue:
+            transaction.on_commit(lambda: queue_hotline_seed_refresh(obj.pk))
 
     @admin.action(description="Queue selected Hotline seeds")
     def queue_selected_seeds(self, request, queryset):
         queued = 0
         skipped = 0
         for seed in queryset.select_related("category"):
-            if not seed.is_active:
+            if not seed.is_active or seed.category.parent_id is None:
                 skipped += 1
                 continue
             queue_hotline_seed_refresh(seed)
@@ -107,6 +118,7 @@ class HotlineSeedAdmin(admin.ModelAdmin):
             HotlineSeed.objects.create(
                 key=key,
                 query=seed.query,
+                source_url=seed.source_url,
                 category=seed.category,
                 is_active=False,
                 priority=seed.priority,
@@ -115,12 +127,12 @@ class HotlineSeedAdmin(admin.ModelAdmin):
 
         self.message_user(request, f"Cloned {cloned} Hotline seed(s) as inactive.", messages.INFO)
 
-    @admin.action(description="Import default seed templates")
-    def import_default_seed_templates(self, request, queryset):
-        created, updated = import_hotline_seed_templates()
+    @admin.action(description="Import default Hotline category templates")
+    def import_default_category_templates(self, request, queryset):
+        created, updated = import_hotline_category_templates()
         self.message_user(
             request,
-            f"Imported Hotline seed templates: created {created}, updated {updated}.",
+            f"Imported Hotline category templates: created {created}, updated {updated}.",
             messages.INFO,
         )
 

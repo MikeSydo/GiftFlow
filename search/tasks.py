@@ -25,16 +25,23 @@ logger = logging.getLogger("search.tasks")
 
 
 def active_hotline_seeds():
-    return HotlineSeed.objects.select_related("category").filter(is_active=True)
+    return HotlineSeed.objects.select_related("category").filter(
+        is_active=True,
+        category__parent__isnull=False,
+    )
 
 
 def get_hotline_seed(seed_key: str) -> HotlineSeed:
     return HotlineSeed.objects.select_related("category").get(key=seed_key)
 
 
-def queue_hotline_seed_refresh(seed: HotlineSeed | str) -> IngestionRun:
+def queue_hotline_seed_refresh(seed: HotlineSeed | str | int) -> IngestionRun:
+    if isinstance(seed, int):
+        seed = HotlineSeed.objects.select_related("category").get(pk=seed)
     if isinstance(seed, str):
         seed = get_hotline_seed(seed)
+    if seed.category_id and seed.category.parent_id is None:
+        raise ValueError("Hotline seed refresh requires a subcategory.")
 
     active_run = get_active_ingestion_run(
         IngestionRun.TASK_TYPE_SEED_REFRESH,
@@ -123,7 +130,10 @@ def refresh_hotline_seed(run_id: int) -> None:
 
     try:
         with HotlineAdapter() as adapter:
-            summaries = adapter.search(seed.query)
+            if seed.source_url:
+                summaries = adapter.search_category(seed.source_url)
+            else:
+                summaries = adapter.search(seed.query)
 
         updated_count = 0
         for summary in summaries:
