@@ -313,6 +313,10 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": timedelta(hours=1),
         "args": (100,),
     },
+    "product-link-verification": {
+        "task": "shops.tasks.trigger_all_verifications",
+        "schedule": timedelta(hours=6),
+    },
 }
 
 # Logging

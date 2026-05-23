@@ -46,8 +46,8 @@ class ShopCategoryAliasAdmin(admin.ModelAdmin):
 class ProductLinkAdmin(admin.ModelAdmin):
     list_display = [
         "product_name", "shop", "seller_name", "gift", "price",
-        "in_stock", "is_marketplace_offer", "needs_category_review",
-        "category_confidence", "last_price_update", "click_count",
+        "in_stock", "is_verified", "is_marketplace_offer", "needs_category_review",
+        "category_confidence", "last_checked", "last_price_update", "click_count",
     ]
     list_filter = [
         "shop", "in_stock", "is_verified", "needs_category_review", "is_marketplace_offer",

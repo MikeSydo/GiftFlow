@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -13,6 +14,7 @@ logger = logging.getLogger("search.hotline")
 
 HOTLINE_BASE_URL = "https://hotline.ua"
 HOTLINE_SEARCH_URL = f"{HOTLINE_BASE_URL}/ua/sr/"
+HOTLINE_CATEGORY_MAX_PAGES = 50
 HOTLINE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -72,6 +74,28 @@ class HotlineAdapter:
         response = self.client.get(HOTLINE_SEARCH_URL, params={"q": query})
         response.raise_for_status()
         return self._parse_search_html(response.text)
+
+    def search_category(self, category_url: str, *, max_pages: int = HOTLINE_CATEGORY_MAX_PAGES) -> list[HotlineOffer]:
+        offers: list[HotlineOffer] = []
+        seen_offer_ids: set[str] = set()
+
+        for page in range(1, max_pages + 1):
+            response = self.client.get(self._category_page_url(category_url, page))
+            response.raise_for_status()
+            page_offers = self._parse_search_html(response.text)
+            new_count = 0
+            for offer in page_offers:
+                if offer.external_offer_id in seen_offer_ids:
+                    continue
+                seen_offer_ids.add(offer.external_offer_id)
+                offers.append(offer)
+                new_count += 1
+
+            if not page_offers or new_count == 0:
+                break
+
+        logger.info("[hotline] parsed %d category offers from %s", len(offers), category_url)
+        return offers
 
     def fetch_product_offers(
         self,
@@ -346,3 +370,21 @@ class HotlineAdapter:
         if value.startswith("http://") or value.startswith("https://"):
             return value
         return f"https://{value.lstrip('/')}"
+
+    @staticmethod
+    def _category_page_url(category_url: str, page: int) -> str:
+        parts = urlsplit(category_url)
+        query = dict(parse_qsl(parts.query, keep_blank_values=True))
+        if page <= 1:
+            query.pop("p", None)
+        else:
+            query["p"] = str(page)
+        return urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path,
+                urlencode(sorted(query.items())),
+                "",
+            )
+        )
