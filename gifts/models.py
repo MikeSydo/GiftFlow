@@ -149,13 +149,13 @@ class Gift(models.Model):
         super().save(*args, **kwargs)
 
     def get_occasion_tags(self):
-        return self.tags.filter(tag_type='occasion')
+        return self.tags.filter(tag_type='O')
 
     def get_relationship_tags(self):
-        return self.tags.filter(tag_type='relationship')
+        return self.tags.filter(tag_type='R')
 
     def get_interest_tags(self):
-        return self.tags.filter(tag_type='interest')
+        return self.tags.filter(tag_type='I')
 
 class GiftImage(models.Model):
     gift = models.ForeignKey(Gift, on_delete=models.CASCADE, related_name='images')

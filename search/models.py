@@ -2,6 +2,39 @@ from django.db import models
 from django.utils import timezone
 
 
+class HotlineSeed(models.Model):
+    key = models.SlugField(max_length=100, unique=True)
+    query = models.CharField(max_length=200)
+    category = models.ForeignKey(
+        "gifts.Category",
+        on_delete=models.PROTECT,
+        related_name="hotline_seeds",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    priority = models.PositiveIntegerField(default=100, db_index=True)
+    last_queued_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["priority", "key"]
+        indexes = [
+            models.Index(fields=["is_active", "priority"]),
+            models.Index(fields=["category", "is_active"]),
+        ]
+
+    @property
+    def category_slug(self) -> str:
+        return self.category.slug
+
+    @property
+    def category_name(self) -> str:
+        return self.category.name
+
+    def __str__(self):
+        return f"{self.key}: {self.query}"
+
+
 class IngestionRun(models.Model):
     TASK_TYPE_SEED_REFRESH = "seed_refresh"
     TASK_TYPE_PRODUCT_REFRESH = "product_refresh"

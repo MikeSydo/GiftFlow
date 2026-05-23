@@ -15,12 +15,12 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 
-from gifts.models import Category, Gift
+from gifts.default_tags import seed_default_tags
+from gifts.models import Category, Gift, Tag
 from shops.models import PriceHistory, ProductLink, Shop, normalize_product_url
 from shops.signals import suppress_productlink_price_cache_updates
 
-from .models import IngestionRun
-from .seeds import HotlineSeed
+from .models import HotlineSeed, IngestionRun
 
 logger = logging.getLogger("search.services")
 
@@ -44,6 +44,29 @@ HOTLINE_OG_IMAGE_PATTERN = re.compile(
 HOTLINE_TX_PLACEHOLDER_IMAGE_PATTERN = re.compile(
     r"^(?P<prefix>https://hotline\.ua/img/tx/\d+/\d+)0(?P<suffix>\.[a-z0-9]+)$",
     re.I,
+)
+HOTLINE_TAG_RULES = {
+    "electronics": [("Tech", "I")],
+    "gaming": [("Gaming", "I"), ("Teen", "A"), ("Adult", "A")],
+    "home-kitchen": [("Home", "I")],
+    "beauty": [("Beauty", "I")],
+    "fashion": [("Adult", "A")],
+    "accessories": [("Adult", "A")],
+    "sports-outdoors": [("Fitness", "I")],
+    "auto": [("Auto", "I"), ("Adult", "A")],
+    "toys-kids": [("Toys", "I"), ("Kids", "A"), ("Child", "R")],
+    "hobbies-creativity": [("Creativity", "I")],
+    "pets": [("Pets", "I")],
+    "office": [("Colleague", "R"), ("Adult", "A")],
+    "travel": [("Travel", "I")],
+}
+HOTLINE_KEYWORD_TAG_RULES = (
+    (("coffee", "espresso", "cappuccino"), ("Coffee", "I")),
+    (("playstation", "xbox", "nintendo", "gamepad", "gaming", "headset"), ("Gaming", "I")),
+    (("fitness", "dumbbell", "scooter"), ("Fitness", "I")),
+    (("pet", "cat", "dog"), ("Pets", "I")),
+    (("backpack", "suitcase", "thermos"), ("Travel", "I")),
+    (("hair", "shaver", "beauty"), ("Beauty", "I")),
 )
 
 
@@ -73,6 +96,10 @@ def refresh_gift_price_cache(gift_id: int) -> None:
 
 
 def ensure_hotline_category(seed: HotlineSeed) -> Category:
+    category = getattr(seed, "category", None)
+    if category is not None:
+        return category
+
     category, _ = Category.objects.get_or_create(
         slug=seed.category_slug,
         defaults={
@@ -82,6 +109,33 @@ def ensure_hotline_category(seed: HotlineSeed) -> Category:
         },
     )
     return category
+
+
+def assign_hotline_gift_tags(gift: Gift, seed: HotlineSeed, title: str) -> bool:
+    seed_default_tags()
+    category = ensure_hotline_category(seed)
+    wanted: set[tuple[str, str]] = set(HOTLINE_TAG_RULES.get(category.slug, []))
+    text = normalize_search_query(f"{seed.query} {title}")
+    for keywords, tag in HOTLINE_KEYWORD_TAG_RULES:
+        if any(keyword in text for keyword in keywords):
+            wanted.add(tag)
+
+    if not wanted:
+        return False
+
+    tags = list(
+        Tag.objects.filter(
+            name__in=[name for name, _ in wanted],
+            tag_type__in=[tag_type for _, tag_type in wanted],
+        )
+    )
+    current_ids = set(gift.tags.values_list("id", flat=True))
+    new_tags = [tag for tag in tags if tag.id not in current_ids]
+    if not new_tags:
+        return False
+
+    gift.tags.add(*new_tags)
+    return True
 
 
 def build_unique_gift_name(title: str, *, source_product_id: str | None = None, exclude_id: int | None = None) -> str:
@@ -436,6 +490,7 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
             product_url=summary.product_url,
         )
         gift.save()
+        assign_hotline_gift_tags(gift, seed, summary.title)
         return gift, True, True
 
     if cache_hotline_gift_image(
@@ -447,6 +502,9 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
 
     if changed_fields:
         gift.save(update_fields=sorted(set(changed_fields + ["updated_at"])))
+        assign_hotline_gift_tags(gift, seed, summary.title)
+        return gift, False, True
+    if assign_hotline_gift_tags(gift, seed, summary.title):
         return gift, False, True
     return gift, False, False
 

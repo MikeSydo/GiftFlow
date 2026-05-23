@@ -288,6 +288,7 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ROUTES = {
+    'search.tasks.enqueue_missing_hotline_seed_refreshes': {'queue': 'discovery'},
     'search.tasks.enqueue_hotline_seed_refreshes': {'queue': 'discovery'},
     'search.tasks.enqueue_stale_hotline_product_refreshes': {'queue': 'prices'},
     'search.tasks.refresh_hotline_seed': {'queue': 'discovery'},
@@ -299,6 +300,10 @@ CELERY_TASK_ROUTES = {
 }
 
 CELERY_BEAT_SCHEDULE = {
+    "hotline-cold-start-bootstrap-guard": {
+        "task": "search.tasks.enqueue_missing_hotline_seed_refreshes",
+        "schedule": timedelta(minutes=5),
+    },
     "hotline-seed-refresh": {
         "task": "search.tasks.enqueue_hotline_seed_refreshes",
         "schedule": timedelta(hours=6),

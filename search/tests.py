@@ -17,11 +17,12 @@ from gifts.models import Gift, Category, Tag
 from shops.models import PriceHistory, ProductLink, Shop
 
 from .hotline import HotlineAdapter, HotlineMerchantOffer, HotlineOffer
-from .admin import IngestionRunAdmin
-from .models import IngestionRun
-from .seeds import HotlineSeed
+from .admin import HotlineSeedAdmin, IngestionRunAdmin
+from .models import HotlineSeed as DbHotlineSeed, IngestionRun
+from .seed_catalog import import_hotline_seed_templates
+from .seeds import HOTLINE_SEEDS, HotlineSeed
 from .services import cache_shop_logo, resolve_hotline_product_image_url, upsert_hotline_gift_from_summary
-from .tasks import refresh_hotline_product
+from .tasks import queue_missing_hotline_seed_refreshes, refresh_hotline_product
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
 
@@ -482,6 +483,12 @@ class IngestionRunAdminActionTestCase(TestCase):
             source_product_id="21916104",
             source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
         )
+        self.seed = DbHotlineSeed.objects.create(
+            key="gaming-gamepads",
+            query="gamepad",
+            category=Category.objects.get_or_create(name="Gaming", slug="gaming")[0],
+            is_active=True,
+        )
 
     @patch("search.admin.queue_hotline_seed_refresh")
     def test_retry_failed_runs_queues_only_failed_runs(self, mocked_queue):
@@ -530,6 +537,146 @@ class IngestionRunAdminActionTestCase(TestCase):
 
         self.assertGreaterEqual(mocked_queue.call_count, 1)
         self.model_admin.message_user.assert_called_once()
+
+
+class ColdStartHotlineBootstrapTestCase(TestCase):
+    def setUp(self):
+        import_hotline_seed_templates()
+
+    @patch("search.tasks.refresh_hotline_seed.delay")
+    def test_queues_all_missing_seed_keys_on_empty_database(self, mocked_delay):
+        queued = queue_missing_hotline_seed_refreshes()
+
+        self.assertEqual(queued, len(HOTLINE_SEEDS))
+        self.assertEqual(
+            IngestionRun.objects.filter(
+                task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+                status=IngestionRun.STATUS_PENDING,
+            ).count(),
+            len(HOTLINE_SEEDS),
+        )
+        self.assertEqual(mocked_delay.call_count, len(HOTLINE_SEEDS))
+
+    @patch("search.tasks.refresh_hotline_seed.delay")
+    def test_skips_seed_keys_that_already_completed(self, mocked_delay):
+        completed_seed = HOTLINE_SEEDS[0]
+        IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=completed_seed.key,
+            status=IngestionRun.STATUS_COMPLETED,
+        )
+
+        queued = queue_missing_hotline_seed_refreshes()
+
+        self.assertEqual(queued, len(HOTLINE_SEEDS) - 1)
+        self.assertEqual(mocked_delay.call_count, len(HOTLINE_SEEDS) - 1)
+        self.assertEqual(
+            IngestionRun.objects.filter(seed_key=completed_seed.key).count(),
+            1,
+        )
+
+    @patch("search.tasks.refresh_hotline_seed.delay")
+    def test_requeues_failed_seed_keys(self, mocked_delay):
+        failed_seed = HOTLINE_SEEDS[0]
+        IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=failed_seed.key,
+            status=IngestionRun.STATUS_FAILED,
+        )
+
+        queued = queue_missing_hotline_seed_refreshes()
+
+        self.assertEqual(queued, len(HOTLINE_SEEDS))
+        self.assertEqual(mocked_delay.call_count, len(HOTLINE_SEEDS))
+        self.assertEqual(
+            IngestionRun.objects.filter(seed_key=failed_seed.key).count(),
+            2,
+        )
+
+    @patch("search.tasks.refresh_hotline_seed.delay")
+    def test_does_not_duplicate_active_seed_runs(self, mocked_delay):
+        active_seed = HOTLINE_SEEDS[0]
+        IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=active_seed.key,
+            status=IngestionRun.STATUS_PENDING,
+        )
+
+        queued = queue_missing_hotline_seed_refreshes()
+
+        self.assertEqual(queued, len(HOTLINE_SEEDS) - 1)
+        self.assertEqual(mocked_delay.call_count, len(HOTLINE_SEEDS) - 1)
+        self.assertEqual(
+            IngestionRun.objects.filter(seed_key=active_seed.key).count(),
+            1,
+        )
+
+    @patch("search.tasks.refresh_hotline_seed.delay")
+    def test_ignores_inactive_database_seeds(self, mocked_delay):
+        inactive_seed = HOTLINE_SEEDS[0]
+        DbHotlineSeed.objects.filter(key=inactive_seed.key).update(is_active=False)
+
+        queued = queue_missing_hotline_seed_refreshes()
+
+        self.assertEqual(queued, len(HOTLINE_SEEDS) - 1)
+        self.assertEqual(mocked_delay.call_count, len(HOTLINE_SEEDS) - 1)
+        self.assertFalse(IngestionRun.objects.filter(seed_key=inactive_seed.key).exists())
+
+    def test_seed_template_import_is_idempotent(self):
+        first_created, first_updated = import_hotline_seed_templates()
+        second_created, second_updated = import_hotline_seed_templates()
+
+        self.assertEqual(first_created, 0)
+        self.assertEqual(first_updated, 0)
+        self.assertEqual(second_created, 0)
+        self.assertEqual(second_updated, 0)
+        self.assertEqual(DbHotlineSeed.objects.count(), len(HOTLINE_SEEDS))
+
+    def test_seed_template_import_preserves_inactive_admin_choice(self):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        seed.is_active = False
+        seed.save(update_fields=["is_active"])
+
+        import_hotline_seed_templates()
+
+        seed.refresh_from_db()
+        self.assertFalse(seed.is_active)
+
+
+class HotlineSeedAdminActionTestCase(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().post("/admin/search/hotlineseed/")
+        self.model_admin = HotlineSeedAdmin(DbHotlineSeed, admin.site)
+        self.model_admin.message_user = Mock()
+        self.category = Category.objects.create(name="Gaming", slug="gaming")
+        self.seed = DbHotlineSeed.objects.create(
+            key="gaming-gamepads",
+            query="gamepad",
+            category=self.category,
+            is_active=True,
+        )
+
+    @patch("search.admin.queue_hotline_seed_refresh")
+    def test_queue_selected_seeds_queues_active_seed(self, mocked_queue):
+        self.model_admin.queue_selected_seeds(
+            self.request,
+            DbHotlineSeed.objects.filter(id=self.seed.id),
+        )
+
+        mocked_queue.assert_called_once()
+        self.assertEqual(mocked_queue.call_args.args[0].key, self.seed.key)
+        self.model_admin.message_user.assert_called_once()
+
+    def test_clone_selected_seeds_creates_inactive_copy(self):
+        self.model_admin.clone_selected_seeds(
+            self.request,
+            DbHotlineSeed.objects.filter(id=self.seed.id),
+        )
+
+        clone = DbHotlineSeed.objects.get(key="gaming-gamepads-copy")
+        self.assertFalse(clone.is_active)
+        self.assertEqual(clone.query, self.seed.query)
+        self.assertEqual(clone.category, self.seed.category)
 
 
 class HotlineProductOfferParserTestCase(TestCase):
@@ -660,6 +807,34 @@ class HotlineGiftImageCacheTestCase(TestCase):
         mocked_client.return_value.__enter__.return_value.get.assert_any_call(
             "https://hotline.ua/img/real-gamepad.jpg",
         )
+
+    @patch("search.services.httpx.Client")
+    def test_upsert_hotline_gift_assigns_basic_tags(self, mocked_client):
+        product_response = Mock()
+        product_response.text = (
+            '<meta property="og:image" '
+            'content="https://hotline.ua/img/real-gamepad.jpg">'
+        )
+        product_response.raise_for_status.return_value = None
+        image_response = Mock()
+        image_response.headers = {"content-type": "image/jpeg"}
+        image_response.content = b"jpeg-bytes"
+        image_response.raise_for_status.return_value = None
+        mocked_client.return_value.__enter__.return_value.get.side_effect = [
+            product_response,
+            image_response,
+        ]
+
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                gift, _, _ = upsert_hotline_gift_from_summary(
+                    self._seed(),
+                    self._summary(),
+                )
+
+        tag_names = set(gift.tags.values_list("name", flat=True))
+        self.assertIn("Gaming", tag_names)
+        self.assertIn("Teen", tag_names)
 
     @patch("search.services.httpx.Client")
     def test_upsert_hotline_gift_keeps_image_url_when_cache_download_fails(self, mocked_client):

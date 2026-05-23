@@ -7,14 +7,45 @@ from django.contrib import admin
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from decimal import Decimal
 
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from gifts.admin import GiftAdmin
-from gifts.models import Category, Gift, GiftImage
+from gifts.models import Category, Gift, GiftImage, Tag
 from shops.models import ProductLink, Shop
+
+
+class FakeS3Object:
+    def __init__(self, key):
+        self.key = key
+
+
+class FakeS3Objects:
+    def __init__(self, keys):
+        self.keys = keys
+
+    def filter(self, *, Prefix):
+        return [FakeS3Object(key) for key in self.keys if key.startswith(Prefix)]
+
+
+class FakeS3Bucket:
+    def __init__(self, keys):
+        self.objects = FakeS3Objects(keys)
+
+
+class FakeS3Storage:
+    __module__ = "storages.backends.s3"
+
+    def __init__(self, keys, location="media"):
+        self.location = location
+        self.bucket = FakeS3Bucket(keys)
+        self.deleted_names = []
+
+    def delete(self, name):
+        self.deleted_names.append(name)
 
 
 class SeedGiftCategoriesCommandTestCase(TestCase):
@@ -30,6 +61,21 @@ class SeedGiftCategoriesCommandTestCase(TestCase):
         self.assertEqual(second_count, 16)
         self.assertTrue(Category.objects.filter(slug="electronics").exists())
         self.assertTrue(Category.objects.filter(slug="home-kitchen").exists())
+
+
+class SeedGiftTagsCommandTestCase(TestCase):
+    def test_seed_command_is_idempotent(self):
+        output = StringIO()
+
+        call_command("seed_gift_tags", stdout=output)
+        first_count = Tag.objects.count()
+        call_command("seed_gift_tags", stdout=output)
+        second_count = Tag.objects.count()
+
+        self.assertEqual(first_count, 23)
+        self.assertEqual(second_count, 23)
+        self.assertTrue(Tag.objects.filter(name="Tech", tag_type="I").exists())
+        self.assertTrue(Tag.objects.filter(name="Birthday", tag_type="O").exists())
 
 
 class CopyMediaToStorageCommandTestCase(TestCase):
@@ -152,6 +198,84 @@ class CopyMediaToStorageCommandTestCase(TestCase):
 
             self.assertIn("copied=0", output.getvalue())
             self.assertIn("missing=0", output.getvalue())
+
+
+class PurgeMediaStorageCommandTestCase(TestCase):
+    @staticmethod
+    def _storage_settings(destination_root):
+        return {
+            "default": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {
+                    "location": destination_root,
+                    "base_url": "/uploaded-media/",
+                },
+            },
+            "staticfiles": {
+                "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+            },
+        }
+
+    def test_refuses_non_s3_default_storage(self):
+        with TemporaryDirectory() as destination_root:
+            with override_settings(STORAGES=self._storage_settings(destination_root)):
+                with self.assertRaises(CommandError):
+                    call_command("purge_media_storage", "--dry-run")
+
+    def test_requires_confirm_when_not_dry_run(self):
+        storage = FakeS3Storage(["media/gifts/a.jpg"])
+
+        with patch("gifts.management.commands.purge_media_storage.default_storage", storage):
+            with self.assertRaises(CommandError):
+                call_command("purge_media_storage")
+
+        self.assertEqual(storage.deleted_names, [])
+
+    def test_dry_run_scopes_to_configured_media_prefix(self):
+        storage = FakeS3Storage(
+            [
+                "media/gifts/a.jpg",
+                "media/shops/logo.png",
+                "other/gifts/b.jpg",
+            ],
+        )
+
+        with patch("gifts.management.commands.purge_media_storage.default_storage", storage):
+            output = StringIO()
+            call_command("purge_media_storage", "--dry-run", stdout=output)
+
+        value = output.getvalue()
+        self.assertIn("Would delete: media/gifts/a.jpg", value)
+        self.assertIn("Would delete: media/shops/logo.png", value)
+        self.assertNotIn("other/gifts/b.jpg", value)
+        self.assertIn("would_delete=2", value)
+        self.assertEqual(storage.deleted_names, [])
+
+    def test_confirm_deletes_storage_relative_names(self):
+        storage = FakeS3Storage(
+            [
+                "media/gifts/a.jpg",
+                "media/shops/logo.png",
+                "other/gifts/b.jpg",
+            ],
+        )
+
+        with patch("gifts.management.commands.purge_media_storage.default_storage", storage):
+            output = StringIO()
+            call_command("purge_media_storage", "--confirm", stdout=output)
+
+        self.assertEqual(
+            storage.deleted_names,
+            ["gifts/a.jpg", "shops/logo.png"],
+        )
+        self.assertIn("deleted=2", output.getvalue())
+
+    def test_refuses_empty_storage_location(self):
+        storage = FakeS3Storage(["gifts/a.jpg"], location="")
+
+        with patch("gifts.management.commands.purge_media_storage.default_storage", storage):
+            with self.assertRaises(CommandError):
+                call_command("purge_media_storage", "--dry-run")
 
 
 class MediaFileCleanupTestCase(TestCase):

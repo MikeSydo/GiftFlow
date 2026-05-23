@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 
 from celery import shared_task
+from django.db import DatabaseError
+from django.utils import timezone
 
 from gifts.models import Gift
 
 from .hotline import HotlineAdapter
-from .models import IngestionRun
-from .seeds import HOTLINE_SEEDS, get_hotline_seed
+from .models import HotlineSeed, IngestionRun
 from .services import (
     create_ingestion_run,
     get_active_ingestion_run,
@@ -23,20 +24,55 @@ from .services import (
 logger = logging.getLogger("search.tasks")
 
 
-def queue_hotline_seed_refresh(seed_key: str) -> IngestionRun:
+def active_hotline_seeds():
+    return HotlineSeed.objects.select_related("category").filter(is_active=True)
+
+
+def get_hotline_seed(seed_key: str) -> HotlineSeed:
+    return HotlineSeed.objects.select_related("category").get(key=seed_key)
+
+
+def queue_hotline_seed_refresh(seed: HotlineSeed | str) -> IngestionRun:
+    if isinstance(seed, str):
+        seed = get_hotline_seed(seed)
+
     active_run = get_active_ingestion_run(
         IngestionRun.TASK_TYPE_SEED_REFRESH,
-        seed_key=seed_key,
+        seed_key=seed.key,
     )
     if active_run is not None:
+        HotlineSeed.objects.filter(id=seed.id).update(last_queued_at=timezone.now())
         return active_run
 
     run = create_ingestion_run(
         IngestionRun.TASK_TYPE_SEED_REFRESH,
-        seed_key=seed_key,
+        seed_key=seed.key,
     )
+    HotlineSeed.objects.filter(id=seed.id).update(last_queued_at=timezone.now())
     refresh_hotline_seed.delay(run.id)
     return run
+
+
+def queue_missing_hotline_seed_refreshes() -> int:
+    queued = 0
+    for seed in active_hotline_seeds():
+        completed_exists = IngestionRun.objects.filter(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+            status=IngestionRun.STATUS_COMPLETED,
+        ).exists()
+        if completed_exists:
+            continue
+        active_run = get_active_ingestion_run(
+            IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+        )
+        if active_run is not None:
+            continue
+
+        queue_hotline_seed_refresh(seed.key)
+        queued += 1
+    return queued
 
 
 def queue_hotline_product_refresh(gift: Gift) -> IngestionRun:
@@ -60,10 +96,22 @@ def queue_hotline_product_refresh(gift: Gift) -> IngestionRun:
 @shared_task(queue="discovery")
 def enqueue_hotline_seed_refreshes() -> int:
     queued = 0
-    for seed in HOTLINE_SEEDS:
-        queue_hotline_seed_refresh(seed.key)
+    for seed in active_hotline_seeds():
+        queue_hotline_seed_refresh(seed)
         queued += 1
     logger.info("[hotline] queued seed refresh runs=%d", queued)
+    return queued
+
+
+@shared_task(queue="discovery")
+def enqueue_missing_hotline_seed_refreshes() -> int:
+    try:
+        queued = queue_missing_hotline_seed_refreshes()
+    except DatabaseError as exc:
+        logger.warning("[hotline] cold-start bootstrap skipped until database is ready: %s", exc)
+        return 0
+
+    logger.info("[hotline] queued cold-start seed refresh runs=%d", queued)
     return queued
 
 

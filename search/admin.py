@@ -1,17 +1,23 @@
 from django.contrib import admin
 from django.contrib import messages
+from django.urls import reverse
+from django.utils.html import format_html
+from django.utils.http import urlencode
 
 from gifts.models import Gift
 
-from .models import IngestionRun
-from .seeds import HOTLINE_SEEDS
-from .tasks import queue_hotline_product_refresh, queue_hotline_seed_refresh
+from .models import HotlineSeed, IngestionRun
+from .seed_catalog import import_hotline_seed_templates
+from .tasks import active_hotline_seeds, queue_hotline_product_refresh, queue_hotline_seed_refresh
 
 
 def queue_run_again(run: IngestionRun) -> bool:
     if run.task_type == IngestionRun.TASK_TYPE_SEED_REFRESH and run.seed_key:
-        queue_hotline_seed_refresh(run.seed_key)
-        return True
+        try:
+            queue_hotline_seed_refresh(run.seed_key)
+            return True
+        except HotlineSeed.DoesNotExist:
+            return False
 
     if run.task_type != IngestionRun.TASK_TYPE_PRODUCT_REFRESH:
         return False
@@ -28,6 +34,107 @@ def queue_run_again(run: IngestionRun) -> bool:
 
     queue_hotline_product_refresh(gift)
     return True
+
+
+@admin.register(HotlineSeed)
+class HotlineSeedAdmin(admin.ModelAdmin):
+    list_display = [
+        "key",
+        "query",
+        "category",
+        "is_active",
+        "priority",
+        "last_queued_at",
+        "related_runs_link",
+    ]
+    list_filter = ["is_active", "category"]
+    search_fields = ["key", "query", "category__name"]
+    autocomplete_fields = ["category"]
+    readonly_fields = ["last_queued_at", "created_at", "updated_at", "related_runs_link"]
+    list_editable = ["is_active", "priority"]
+    ordering = ["priority", "key"]
+    actions = [
+        "queue_selected_seeds",
+        "make_active",
+        "make_inactive",
+        "clone_selected_seeds",
+        "import_default_seed_templates",
+    ]
+
+    fieldsets = (
+        (None, {"fields": ("key", "query", "category")}),
+        ("Scheduling", {"fields": ("is_active", "priority", "last_queued_at")}),
+        ("History", {"fields": ("related_runs_link", "created_at", "updated_at")}),
+    )
+
+    @admin.action(description="Queue selected Hotline seeds")
+    def queue_selected_seeds(self, request, queryset):
+        queued = 0
+        skipped = 0
+        for seed in queryset.select_related("category"):
+            if not seed.is_active:
+                skipped += 1
+                continue
+            queue_hotline_seed_refresh(seed)
+            queued += 1
+
+        self.message_user(
+            request,
+            f"Queued or reused {queued} Hotline seed run(s). Skipped {skipped}.",
+            messages.INFO,
+        )
+
+    @admin.action(description="Make selected seeds active")
+    def make_active(self, request, queryset):
+        count = queryset.update(is_active=True)
+        self.message_user(request, f"{count} Hotline seed(s) made active.", messages.INFO)
+
+    @admin.action(description="Make selected seeds inactive")
+    def make_inactive(self, request, queryset):
+        count = queryset.update(is_active=False)
+        self.message_user(request, f"{count} Hotline seed(s) made inactive.", messages.INFO)
+
+    @admin.action(description="Clone selected seeds")
+    def clone_selected_seeds(self, request, queryset):
+        cloned = 0
+        for seed in queryset.select_related("category"):
+            base_key = f"{seed.key}-copy"
+            key = base_key
+            counter = 2
+            while HotlineSeed.objects.filter(key=key).exists():
+                key = f"{base_key}-{counter}"
+                counter += 1
+            HotlineSeed.objects.create(
+                key=key,
+                query=seed.query,
+                category=seed.category,
+                is_active=False,
+                priority=seed.priority,
+            )
+            cloned += 1
+
+        self.message_user(request, f"Cloned {cloned} Hotline seed(s) as inactive.", messages.INFO)
+
+    @admin.action(description="Import default seed templates")
+    def import_default_seed_templates(self, request, queryset):
+        created, updated = import_hotline_seed_templates()
+        self.message_user(
+            request,
+            f"Imported Hotline seed templates: created {created}, updated {updated}.",
+            messages.INFO,
+        )
+
+    def related_runs_link(self, obj):
+        if obj.pk is None:
+            return "-"
+        url = (
+            reverse("admin:search_ingestionrun_changelist")
+            + "?"
+            + urlencode({"seed_key": obj.key})
+        )
+        return format_html('<a href="{}">View ingestion runs</a>', url)
+
+    related_runs_link.short_description = "Ingestion runs"
 
 
 @admin.register(IngestionRun)
@@ -106,11 +213,13 @@ class IngestionRunAdmin(admin.ModelAdmin):
 
     @admin.action(description="Queue all Hotline seed refreshes")
     def queue_all_hotline_seed_refreshes(self, request, queryset):
-        for seed in HOTLINE_SEEDS:
-            queue_hotline_seed_refresh(seed.key)
+        queued = 0
+        for seed in active_hotline_seeds():
+            queue_hotline_seed_refresh(seed)
+            queued += 1
 
         self.message_user(
             request,
-            f"Queued or reused {len(HOTLINE_SEEDS)} Hotline seed refresh run(s).",
+            f"Queued or reused {queued} active Hotline seed refresh run(s).",
             messages.INFO,
         )
