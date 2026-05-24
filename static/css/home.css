@@ -1,7 +1,7 @@
 :root {
-  --clr-bg: #faf8f5;
+  --clr-bg: #f7f4ef;
   --clr-surface: #ffffff;
-  --clr-surface-alt: #f2ede6;
+  --clr-surface-alt: #f3eee7;
   --clr-border: #e8e0d4;
 
   --clr-text: #2c2420;
@@ -19,9 +19,9 @@
   --font-display: 'Playfair Display', Georgia, serif;
   --font-body: 'Inter', system-ui, sans-serif;
 
-  --radius: 10px;
+  --radius: 8px;
   --radius-sm: 6px;
-  --radius-lg: 18px;
+  --radius-lg: 8px;
   --radius-pill: 999px;
 
   --shadow-sm: 0 2px 8px rgba(44, 36, 32, .07);
@@ -29,7 +29,7 @@
   --shadow-lg: 0 16px 48px rgba(44, 36, 32, .14);
 
   --transition: .28s cubic-bezier(.4, 0, .2, 1);
-  --max-w: 1160px;
+  --max-w: 1180px;
 }
 
 *,
@@ -89,7 +89,7 @@ ul {
   left: 0;
   right: 0;
   z-index: 100;
-  background: rgba(250, 248, 245, .88);
+  background: rgba(255, 253, 249, .9);
   backdrop-filter: blur(12px) saturate(1.4);
   border-bottom: 1px solid var(--clr-border);
   transition: box-shadow var(--transition);
@@ -147,7 +147,7 @@ ul {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 18px;
+  padding: 9px 18px;
   border-radius: var(--radius-pill);
   border: 1.5px solid var(--clr-border);
   background: var(--clr-surface);
@@ -185,13 +185,14 @@ ul {
   top: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%) translateY(-8px);
-  width: 680px;
+  width: min(980px, 92vw);
+  max-height: min(680px, calc(100vh - 92px));
   max-width: 90vw;
   background: var(--clr-surface);
-  border-radius: var(--radius-lg);
+  border-radius: 8px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--clr-border);
-  overflow: hidden;
+  overflow: auto;
   opacity: 0;
   pointer-events: none;
   transition: opacity .24s ease, transform .24s ease;
@@ -204,24 +205,27 @@ ul {
 }
 
 .catalog-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 12px 16px 0;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--clr-surface-alt);
+  border-bottom: 1px solid var(--clr-border);
 }
 
 .catalog-tab {
-  padding: 6px 14px;
-  border-radius: var(--radius-pill);
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 6px;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 700;
   color: var(--clr-text-mid);
   background: transparent;
   transition: background var(--transition), color var(--transition);
 }
 
 .catalog-tab:hover {
-  background: var(--clr-surface-alt);
+  background: #fff;
 }
 
 .catalog-tab--active {
@@ -230,7 +234,7 @@ ul {
 }
 
 .catalog-panels {
-  padding: 14px 16px 16px;
+  padding: 18px;
 }
 
 .catalog-panel {
@@ -238,27 +242,59 @@ ul {
 }
 
 .catalog-panel--active {
+  display: block;
+}
+
+.catalog-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.catalog-panel__title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--clr-text);
+}
+
+.catalog-panel__title:hover {
+  color: var(--clr-accent);
+}
+
+.catalog-panel__meta {
+  color: var(--clr-text-low);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.catalog-panel__grid,
+.catalog-subcategory-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
 }
 
 .catalog-subcategory-link {
   display: flex;
   align-items: center;
-  min-height: 40px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
+  min-height: 42px;
+  padding: 9px 10px;
+  border-radius: 6px;
   color: var(--clr-text-mid);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.25;
-  transition: background var(--transition), color var(--transition);
+  border: 1px solid transparent;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
 
 .catalog-subcategory-link:hover {
   background: var(--clr-accent-pale);
   color: var(--clr-accent);
+  border-color: rgba(122, 46, 63, .16);
 }
 
 .catalog-card {
@@ -271,7 +307,7 @@ ul {
   transition: box-shadow var(--transition), transform var(--transition);
   text-decoration: none;
   color: var(--clr-text);
-  cursor: default;
+  cursor: pointer;
 }
 
 .catalog-card:hover {
@@ -359,7 +395,7 @@ ul {
   justify-content: center;
   padding: 120px 5% 80px;
   overflow: hidden;
-  background: linear-gradient(160deg, #faf8f5 0%, #f0ebe3 50%, #efe8df 100%);
+  background: #f7f4ef;
 }
 
 /* Subtle noise texture overlay */
@@ -468,43 +504,6 @@ ul {
   transform: translateX(4px);
 }
 
-/* Decorative orbs */
-.hero__orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(70px);
-  opacity: .45;
-  pointer-events: none;
-  animation: drift 12s ease-in-out infinite alternate;
-}
-
-.hero__orb--1 {
-  width: 420px;
-  height: 420px;
-  background: radial-gradient(circle, var(--clr-accent-pale), transparent 70%);
-  top: -80px;
-  right: -100px;
-  animation-delay: 0s;
-}
-
-.hero__orb--2 {
-  width: 320px;
-  height: 320px;
-  background: radial-gradient(circle, var(--clr-gold-light), transparent 70%);
-  bottom: -60px;
-  left: -80px;
-  animation-delay: -4s;
-}
-
-.hero__orb--3 {
-  width: 200px;
-  height: 200px;
-  background: radial-gradient(circle, rgba(122, 46, 63, .12), transparent 70%);
-  top: 40%;
-  left: 15%;
-  animation-delay: -8s;
-}
-
 /* Sections (shared) */
 .section {
   padding: 80px 0;
@@ -547,7 +546,7 @@ ul {
 .featured-card {
   background: var(--clr-surface);
   border: 1px solid var(--clr-border);
-  border-radius: var(--radius-lg);
+  border-radius: 8px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -565,7 +564,7 @@ ul {
 
 .featured-card__media {
   position: relative;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
 }
 
@@ -600,7 +599,7 @@ ul {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 20px;
+  padding: 18px;
 }
 
 .featured-card__cat {
@@ -614,7 +613,7 @@ ul {
 
 .featured-card__title {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.35;
   margin-bottom: 6px;
@@ -648,13 +647,6 @@ ul {
   transform: translateX(4px);
 }
 
-.featured-card__link--disabled,
-.gift-card__link--disabled {
-  cursor: default;
-  opacity: .65;
-  pointer-events: none;
-}
-
 /* Catalog gift cards */
 .catalog-grid {
   display: grid;
@@ -665,7 +657,7 @@ ul {
 .gift-card {
   background: var(--clr-surface);
   border: 1px solid var(--clr-border);
-  border-radius: var(--radius);
+  border-radius: 8px;
   overflow: hidden;
   transition: transform var(--transition), box-shadow var(--transition);
   opacity: 0;
@@ -680,7 +672,7 @@ ul {
 }
 
 .gift-card__media {
-  aspect-ratio: 1;
+  aspect-ratio: 4 / 3;
   overflow: hidden;
 }
 
@@ -699,12 +691,12 @@ ul {
 }
 
 .gift-card__body {
-  padding: 14px;
+  padding: 16px;
 }
 
 .gift-card__title {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 600;
   line-height: 1.35;
   margin-bottom: 4px;
@@ -720,19 +712,21 @@ ul {
 .gift-card__footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  min-height: 34px;
 }
 
 .gift-card__link {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 6px;
   background: var(--clr-accent-pale);
   color: var(--clr-accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   transition: background var(--transition), transform var(--transition);
 }
@@ -740,7 +734,7 @@ ul {
 .gift-card__link:hover {
   background: var(--clr-accent);
   color: #fff;
-  transform: scale(1.1);
+  transform: translateX(2px);
 }
 
 /* Section CTA "see all" */
@@ -756,7 +750,7 @@ ul {
   padding: 10px 24px;
   border: 1.5px solid var(--clr-accent);
   color: var(--clr-accent);
-  border-radius: var(--radius-pill);
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   transition: background var(--transition), color var(--transition);

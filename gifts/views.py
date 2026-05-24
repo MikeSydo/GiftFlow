@@ -4,6 +4,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from .models import Category, Gift
 
 
+def public_category_description(category):
+    description = (getattr(category, "description", "") or "").strip()
+    if description.lower().startswith(("hotline category group:", "hotline seed category:")):
+        return ""
+    return description
+
+
 def _deduplicate_categories_by_name(categories):
     deduplicated = []
     seen_names = set()
@@ -62,6 +69,7 @@ def parent_category_detail(request, parent_slug):
         "gifts/category.html",
         {
             "category": category,
+            "category_description": public_category_description(category),
             "gifts": gifts,
             "subcategories": subcategories,
             "all_categories": _top_level_categories(),
@@ -97,6 +105,7 @@ def subcategory_detail(request, parent_slug, subcategory_slug):
         "gifts/category.html",
         {
             "category": category,
+            "category_description": public_category_description(category),
             "parent_category": parent,
             "gifts": gifts,
             "subcategories": _deduplicate_categories_by_name(

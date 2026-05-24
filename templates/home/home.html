@@ -34,10 +34,10 @@
 
         <!-- Dropdown: one tab per top-level category -->
         <div class="catalog-dropdown" id="catalogDropdown">
-          <div class="catalog-tabs" id="catalogTabs">
+          <div class="catalog-tabs" id="catalogTabs" role="tablist" aria-label="Категорії подарунків">
             {% for item in catalog_data %}
             <a class="catalog-tab {% if forloop.first %}catalog-tab--active{% endif %}"
-              href="{{ item.category.get_absolute_url }}" data-tab="{{ forloop.counter0 }}">
+              href="{{ item.category.get_absolute_url }}" data-tab="{{ forloop.counter0 }}" role="tab">
               {{ item.category.name }}
             </a>
             {% empty %}
@@ -49,24 +49,30 @@
             {% for item in catalog_data %}
             <div class="catalog-panel {% if forloop.first %}catalog-panel--active{% endif %}"
               data-panel="{{ forloop.counter0 }}">
-              {% for subcategory in item.subcategories %}
-              <a href="{{ subcategory.get_absolute_url }}" class="catalog-subcategory-link">
-                {{ subcategory.name }}
-              </a>
-              {% empty %}
-              {% for gift in item.gifts %}
-              <article class="catalog-card">
-                {% if gift.image %}
-                <img src="{{ gift.image.url }}" alt="{{ gift.name }}" class="catalog-card__img" />
-                {% else %}
-                <div class="catalog-card__img catalog-card__img--placeholder"></div>
-                {% endif %}
-                <div class="catalog-card__body">
-                  <h4 class="catalog-card__title">{{ gift.name }}</h4>
-                </div>
-              </article>
-              {% endfor %}
-              {% endfor %}
+              <div class="catalog-panel__head">
+                <a href="{{ item.category.get_absolute_url }}" class="catalog-panel__title">{{ item.category.name }}</a>
+                <span class="catalog-panel__meta">{{ item.subcategories|length }} напрямків</span>
+              </div>
+              <div class="catalog-panel__grid">
+                {% for subcategory in item.subcategories %}
+                <a href="{{ subcategory.get_absolute_url }}" class="catalog-subcategory-link">
+                  {{ subcategory.name }}
+                </a>
+                {% empty %}
+                {% for gift in item.gifts %}
+                <a class="catalog-card" href="{% url 'gifts:gift_detail' gift.slug %}">
+                  {% if gift.image %}
+                  <img src="{{ gift.image.url }}" alt="{{ gift.name }}" class="catalog-card__img" />
+                  {% else %}
+                  <div class="catalog-card__img catalog-card__img--placeholder"></div>
+                  {% endif %}
+                  <div class="catalog-card__body">
+                    <h4 class="catalog-card__title">{{ gift.name }}</h4>
+                  </div>
+                </a>
+                {% endfor %}
+                {% endfor %}
+              </div>
             </div>
             {% endfor %}
           </div>
@@ -90,17 +96,12 @@
     <div class="hero__content">
       <h1 class="hero__title">Знайдіть<br /><em>ідеальний</em><br />подарунок</h1>
 
-      <a href="{% url 'home:home' %}" class="btn-hero">
+      <a href="#gift-catalog" class="btn-hero">
         <span class="btn-hero__ring"></span>
-        <span class="btn-hero__text">Починати пошук</span>
+        <span class="btn-hero__text">Переглянути каталог</span>
         <span class="btn-hero__icon">&#8594;</span>
       </a>
     </div>
-
-    <!-- decorative floating orbs -->
-    <div class="hero__orb hero__orb--1"></div>
-    <div class="hero__orb hero__orb--2"></div>
-    <div class="hero__orb hero__orb--3"></div>
   </section>
 
   <!-- Featured -->
@@ -114,7 +115,7 @@
 
       <div class="featured-grid">
         {% for gift in featured_gifts %}
-        <article class="featured-card" style="--delay: {{ forloop.counter0 }}">
+        <a class="featured-card" href="{% url 'gifts:gift_detail' gift.slug %}" style="--delay: {{ forloop.counter0 }}">
           <div class="featured-card__media">
             {% if gift.image %}
             <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
@@ -130,10 +131,10 @@
             <h3 class="featured-card__title">{{ gift.name }}</h3>
             <p class="featured-card__desc">{{ gift.short_description|default:"" }}</p>
             <div class="featured-card__footer">
-              <span class="featured-card__link featured-card__link--disabled">Переглянути -></span>
+              <span class="featured-card__link">Переглянути →</span>
             </div>
           </div>
-        </article>
+        </a>
         {% endfor %}
       </div>
     </div>
@@ -142,19 +143,19 @@
 
   <!-- Catalog sections -->
   {% for item in catalog_data %}
-  <section class="section catalog-section">
+  <section class="section catalog-section" {% if forloop.first %}id="gift-catalog"{% endif %}>
     <div class="container">
       <div class="section-header">
         <h2 class="section-title">{{ item.category.name }}</h2>
-        {% if item.category.description %}
-        <p class="section-desc">{{ item.category.description }}</p>
+        {% if item.description %}
+        <p class="section-desc">{{ item.description }}</p>
         {% endif %}
         <span class="section-line"></span>
       </div>
 
       <div class="catalog-grid">
         {% for gift in item.gifts %}
-        <article class="gift-card" style="--delay: {{ forloop.counter0 }}">
+        <a class="gift-card" href="{% url 'gifts:gift_detail' gift.slug %}" style="--delay: {{ forloop.counter0 }}">
           <div class="gift-card__media">
             {% if gift.image %}
             <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
@@ -166,10 +167,10 @@
             <h3 class="gift-card__title">{{ gift.name }}</h3>
             <p class="gift-card__desc">{{ gift.short_description|default:"" }}</p>
             <div class="gift-card__footer">
-              <span class="gift-card__link gift-card__link--disabled">→</span>
+              <span class="gift-card__link">Переглянути</span>
             </div>
           </div>
-        </article>
+        </a>
         {% endfor %}
       </div>
 
@@ -227,7 +228,7 @@
       </div>
 
       <div class="footer__bottom">
-        <p class="footer__copy">&copy; 2025 GiftFlow. Всі права reservation.</p>
+        <p class="footer__copy">&copy; 2025 GiftFlow. Всі права захищені.</p>
         <div class="footer__legal">
           <a href="#">Конфіденційність</a>
           <a href="#">Умови</a>

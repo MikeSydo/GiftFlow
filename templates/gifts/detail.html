@@ -9,84 +9,176 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-        href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600;700&display=swap"
         rel="stylesheet" />
     <link rel="stylesheet" href="{% static 'css/home.css' %}" />
     <style>
         .gift-detail {
-            padding: 2rem 0 4rem;
+            padding: 7.5rem 0 4rem;
         }
 
-        .gift-detail__hero {
+        .gift-detail__breadcrumb {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .45rem;
+            align-items: center;
+            margin-bottom: 1.4rem;
+            color: var(--clr-text-mid);
+            font-size: .88rem;
+        }
+
+        .gift-detail__breadcrumb a {
+            color: var(--clr-text-mid);
+        }
+
+        .gift-detail__breadcrumb a:hover {
+            color: var(--clr-accent);
+        }
+
+        .gift-detail__layout {
             display: grid;
-            grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
-            gap: 2rem;
+            grid-template-columns: minmax(300px, 440px) minmax(0, 1fr);
+            gap: clamp(1.5rem, 4vw, 4rem);
             align-items: start;
-            margin-bottom: 2rem;
         }
 
         .gift-detail__media {
-            border-radius: 12px;
             overflow: hidden;
-            background: rgba(255, 255, 255, .04);
-            border: 1px solid rgba(255, 255, 255, .08);
-            aspect-ratio: 1 / 1;
+            border-radius: var(--radius-lg);
+            background: #fff;
+            border: 1px solid var(--clr-border);
+            box-shadow: var(--shadow-card);
+            aspect-ratio: 4 / 3;
         }
 
         .gift-detail__media img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
+            display: block;
+            background: #fff;
         }
 
         .gift-detail__placeholder {
             width: 100%;
             height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: grid;
+            place-items: center;
+            color: var(--clr-text-light);
+            font-family: var(--font-display);
             font-size: 3rem;
-            opacity: .25;
+            font-weight: 700;
         }
 
         .gift-detail__category {
-            font-size: .85rem;
-            text-transform: uppercase;
+            display: inline-flex;
+            align-items: center;
+            min-height: 32px;
+            padding: .35rem .75rem;
+            border-radius: 999px;
+            background: rgba(122, 46, 63, .1);
+            color: var(--clr-accent);
+            font-size: .76rem;
+            font-weight: 800;
             letter-spacing: .08em;
-            color: var(--accent, #c0739a);
-            margin-bottom: .75rem;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
         }
 
         .gift-detail__title {
-            margin: 0 0 .75rem;
-            font-family: 'Playfair Display', serif;
-            font-size: clamp(2rem, 4vw, 3rem);
-            color: var(--text-primary, #f5efe9);
+            margin: 0 0 1rem;
+            max-width: 820px;
+            font-family: var(--font-display);
+            color: var(--clr-text);
+            font-size: clamp(2.25rem, 5vw, 4.8rem);
+            line-height: .98;
+            letter-spacing: 0;
         }
 
         .gift-detail__desc {
-            color: var(--text-muted, #a89080);
-            line-height: 1.7;
-            margin: 0 0 1rem;
+            max-width: 680px;
+            color: var(--clr-text-mid);
+            font-size: 1rem;
+            line-height: 1.75;
+            margin: 0 0 1.25rem;
         }
 
-        .gift-detail__meta {
+        .gift-detail__tags,
+        .gift-detail__reactions {
             display: flex;
             flex-wrap: wrap;
+            gap: .55rem;
+            margin-top: 1.2rem;
+        }
+
+        .gift-detail__tag,
+        .reaction-pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 36px;
+            padding: .45rem .8rem;
+            border-radius: 999px;
+            border: 1px solid var(--clr-border);
+            background: #fff;
+            color: var(--clr-text-mid);
+            font-size: .86rem;
+            font-weight: 700;
+        }
+
+        .reaction-pill {
             gap: .5rem;
         }
 
-        .gift-detail__tag {
-            padding: .45rem .8rem;
-            border: 1px solid rgba(255, 255, 255, .12);
-            border-radius: 999px;
-            color: var(--text-muted, #a89080);
-            font-size: .85rem;
+        .reaction-pill span {
+            color: var(--clr-accent);
+            font-weight: 800;
+        }
+
+        .gift-detail__discussion {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--clr-border);
+        }
+
+        .discussion-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+            gap: 1.25rem;
+        }
+
+        .discussion-panel {
+            border: 1px solid var(--clr-border);
+            border-radius: var(--radius-lg);
+            background: rgba(255, 255, 255, .72);
+            padding: 1.25rem;
+        }
+
+        .discussion-panel__title {
+            margin: 0 0 .75rem;
+            color: var(--clr-text);
+            font-size: 1.05rem;
+        }
+
+        .discussion-panel__empty {
+            margin: 0;
+            color: var(--clr-text-mid);
+            line-height: 1.6;
         }
 
         @media (max-width: 900px) {
-            .gift-detail__hero {
+            .gift-detail__layout,
+            .discussion-grid {
                 grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 680px) {
+            .gift-detail {
+                padding-top: 6rem;
+            }
+
+            .gift-detail__title {
+                font-size: clamp(2rem, 13vw, 3.2rem);
             }
         }
     </style>
@@ -108,54 +200,78 @@
                 </button>
 
                 <div class="catalog-dropdown" id="catalogDropdown">
-                    <div class="catalog-tabs" id="catalogTabs">
+                    <div class="catalog-tabs" id="catalogTabs" role="tablist" aria-label="Категорії подарунків">
                         {% for cat in all_categories %}
                         <a class="catalog-tab {% if current_top_category and cat.id == current_top_category.id %}catalog-tab--active{% endif %}"
-                            href="{{ cat.get_absolute_url }}">
+                            href="{{ cat.get_absolute_url }}" data-tab="{{ forloop.counter0 }}" role="tab">
                             {{ cat.name }}
                         </a>
                         {% empty %}
-                        <span class="catalog-empty">Categories are empty</span>
+                        <span class="catalog-empty">Категорії ще не додані</span>
+                        {% endfor %}
+                    </div>
+
+                    <div class="catalog-panels" id="catalogPanels">
+                        {% for cat in all_categories %}
+                        <div class="catalog-panel {% if current_top_category and cat.id == current_top_category.id %}catalog-panel--active{% elif not current_top_category and forloop.first %}catalog-panel--active{% endif %}"
+                            data-panel="{{ forloop.counter0 }}">
+                            <div class="catalog-panel__head">
+                                <a href="{{ cat.get_absolute_url }}" class="catalog-panel__title">{{ cat.name }}</a>
+                                <span class="catalog-panel__meta">{{ cat.visible_subcategories|length }} напрямків</span>
+                            </div>
+                            <div class="catalog-panel__grid">
+                                {% for subcategory in cat.visible_subcategories %}
+                                <a href="{{ subcategory.get_absolute_url }}" class="catalog-subcategory-link">
+                                    {{ subcategory.name }}
+                                </a>
+                                {% empty %}
+                                <a href="{{ cat.get_absolute_url }}" class="catalog-subcategory-link">
+                                    Всі подарунки
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
                         {% endfor %}
                     </div>
                 </div>
             </nav>
 
             <div class="nav-actions">
-                <a class="btn-nav btn-nav--outline" href="{% url 'home:home' %}">Home</a>
+                <button class="btn-nav btn-nav--outline" id="btnLogin">Вхід</button>
+                <button class="btn-nav btn-nav--primary" id="btnSignup">Реєстрація</button>
             </div>
         </div>
     </header>
 
     <main class="container gift-detail">
-        <div class="breadcrumb">
-            <a href="{% url 'home:home' %}">Home</a>
-            <span class="breadcrumb__sep">›</span>
+        <nav class="gift-detail__breadcrumb" aria-label="Навігація">
+            <a href="{% url 'home:home' %}">Головна</a>
+            <span>›</span>
             {% if gift.category %}
             {% if gift.category.parent %}
             <a href="{{ gift.category.parent.get_absolute_url }}">{{ gift.category.parent.name }}</a>
-            <span class="breadcrumb__sep">вЂє</span>
+            <span>›</span>
             {% endif %}
             <a href="{{ gift.category.get_absolute_url }}">{{ gift.category.name }}</a>
-            <span class="breadcrumb__sep">›</span>
+            <span>›</span>
             {% endif %}
             <span>{{ gift.name }}</span>
-        </div>
+        </nav>
 
-        <section class="gift-detail__hero">
+        <section class="gift-detail__layout">
             <div class="gift-detail__media">
                 {% if gift.image %}
                 <img src="{{ gift.image.url }}" alt="{{ gift.name }}" />
                 {% elif gift.image_url %}
                 <img src="{{ gift.image_url }}" alt="{{ gift.name }}" />
                 {% else %}
-                <div class="gift-detail__placeholder">&#127873;</div>
+                <div class="gift-detail__placeholder">GF</div>
                 {% endif %}
             </div>
 
             <div>
                 {% if gift.category %}
-                <div class="gift-detail__category">{{ gift.category.name }}</div>
+                <a class="gift-detail__category" href="{{ gift.category.get_absolute_url }}">{{ gift.category.name }}</a>
                 {% endif %}
                 <h1 class="gift-detail__title">{{ gift.name }}</h1>
                 {% if gift.short_description %}
@@ -165,12 +281,37 @@
                 {% endif %}
 
                 {% if gift.tags.all %}
-                <div class="gift-detail__meta">
+                <div class="gift-detail__tags">
                     {% for tag in gift.tags.all %}
                     <span class="gift-detail__tag">{{ tag.name }}</span>
                     {% endfor %}
                 </div>
                 {% endif %}
+
+                <div class="gift-detail__reactions" aria-label="Реакції">
+                    <span class="reaction-pill">Подобається <span>0</span></span>
+                    <span class="reaction-pill">Хочу <span>0</span></span>
+                    <span class="reaction-pill">Маю <span>0</span></span>
+                    <span class="reaction-pill">Відгуки <span>0</span></span>
+                </div>
+            </div>
+        </section>
+
+        <section class="gift-detail__discussion" aria-labelledby="discussion-title">
+            <div class="section-header">
+                <h2 class="section-title" id="discussion-title">Обговорення</h2>
+                <span class="section-line"></span>
+            </div>
+
+            <div class="discussion-grid">
+                <div class="discussion-panel">
+                    <h3 class="discussion-panel__title">Коментарі</h3>
+                    <p class="discussion-panel__empty">Поки немає обговорень.</p>
+                </div>
+                <div class="discussion-panel">
+                    <h3 class="discussion-panel__title">Оцінки спільноти</h3>
+                    <p class="discussion-panel__empty">Перші реакції з'являться тут.</p>
+                </div>
             </div>
         </section>
     </main>
