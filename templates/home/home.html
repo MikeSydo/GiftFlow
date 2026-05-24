@@ -63,9 +63,6 @@
                 {% endif %}
                 <div class="catalog-card__body">
                   <h4 class="catalog-card__title">{{ gift.name }}</h4>
-                  {% if gift.min_price %}
-                  <span class="catalog-card__price">від {{ gift.min_price }} ₴</span>
-                  {% endif %}
                 </div>
               </article>
               {% endfor %}
@@ -133,9 +130,6 @@
             <h3 class="featured-card__title">{{ gift.name }}</h3>
             <p class="featured-card__desc">{{ gift.short_description|default:"" }}</p>
             <div class="featured-card__footer">
-              {% if gift.min_price %}
-              <span class="featured-card__price">від {{ gift.min_price }} ₴</span>
-              {% endif %}
               <span class="featured-card__link featured-card__link--disabled">Переглянути -></span>
             </div>
           </div>
@@ -172,9 +166,6 @@
             <h3 class="gift-card__title">{{ gift.name }}</h3>
             <p class="gift-card__desc">{{ gift.short_description|default:"" }}</p>
             <div class="gift-card__footer">
-              {% if gift.min_price %}
-              <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
-              {% endif %}
               <span class="gift-card__link gift-card__link--disabled">→</span>
             </div>
           </div>

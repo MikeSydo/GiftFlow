@@ -149,12 +149,6 @@
             flex-wrap: wrap;
         }
 
-        .gift-card__price {
-            font-size: .9rem;
-            font-weight: 600;
-            color: var(--accent, #c0739a);
-        }
-
         .gift-card__link {
             font-size: .85rem;
             color: #7b6859;
@@ -386,9 +380,6 @@
                     <p class="gift-card__desc">{{ gift.short_description }}</p>
                     {% endif %}
                     <div class="gift-card__footer">
-                        {% if gift.min_price %}
-                        <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
-                        {% endif %}
                         <span class="gift-card__link gift-card__link--disabled">Переглянути →</span>
                     </div>
                 </div>

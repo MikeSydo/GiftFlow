@@ -36,7 +36,7 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(Gift)
 class GiftAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'gender', 'age_range', 'price_range', 'popularity_score', 'is_active', 'is_featured', 'created_at')
+    list_display = ('name', 'category', 'gender', 'age_range', 'popularity_score', 'is_active', 'is_featured', 'created_at')
     list_filter = ('is_active', 'is_featured', 'gender', 'category', 'tags')
     search_fields = ('name', 'description', 'short_description')
     prepopulated_fields = {'slug': ('name',)}
@@ -65,7 +65,7 @@ class GiftAdmin(admin.ModelAdmin):
             'fields': ('category', 'tags')
         }),
         ('Characteristics', {
-            'fields': ('gender', 'age_min', 'age_max', 'min_price', 'max_price')
+            'fields': ('gender', 'age_min', 'age_max')
         }),
         ('Settings', {
             'fields': ('popularity_score', 'is_active', 'is_featured')
@@ -79,9 +79,3 @@ class GiftAdmin(admin.ModelAdmin):
     def age_range(self, obj):
         return f"{obj.age_min}-{obj.age_max} ages"
     age_range.short_description = "Age range"
-
-    def price_range(self, obj):
-        if obj.min_price and obj.max_price:
-            return f"{obj.min_price}-{obj.max_price}"
-        return "Not available"
-    price_range.short_description = "Price range"

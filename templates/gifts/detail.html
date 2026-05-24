@@ -70,14 +70,6 @@
             margin: 0 0 1rem;
         }
 
-        .gift-detail__price {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 1rem;
-            margin-bottom: 1rem;
-            color: var(--text-primary, #f5efe9);
-        }
-
         .gift-detail__meta {
             display: flex;
             flex-wrap: wrap;
@@ -171,15 +163,6 @@
                 {% elif gift.description %}
                 <p class="gift-detail__desc">{{ gift.description }}</p>
                 {% endif %}
-
-                <div class="gift-detail__price">
-                    {% if gift.min_price %}
-                    <span>From {{ gift.min_price }} UAH</span>
-                    {% endif %}
-                    {% if gift.max_price and gift.max_price != gift.min_price %}
-                    <span>To {{ gift.max_price }} UAH</span>
-                    {% endif %}
-                </div>
 
                 {% if gift.tags.all %}
                 <div class="gift-detail__meta">

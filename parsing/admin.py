@@ -140,8 +140,6 @@ class IngestionRunAdmin(admin.ModelAdmin):
     list_display = [
         "task_type",
         "seed_key",
-        "gift",
-        "source_product_id",
         "status",
         "discovered_count",
         "updated_count",
@@ -149,12 +147,10 @@ class IngestionRunAdmin(admin.ModelAdmin):
         "finished_at",
     ]
     list_filter = ["task_type", "status", "created_at", "updated_at"]
-    search_fields = ["seed_key", "source_product_id", "gift__name", "last_error"]
+    search_fields = ["seed_key", "last_error"]
     readonly_fields = [
         "task_type",
         "seed_key",
-        "gift",
-        "source_product_id",
         "status",
         "discovered_count",
         "updated_count",
@@ -193,7 +189,7 @@ class IngestionRunAdmin(admin.ModelAdmin):
             messages.INFO,
         )
 
-    @admin.action(description="Requeue selected seed/product refreshes")
+    @admin.action(description="Requeue selected seed refreshes")
     def requeue_selected_runs(self, request, queryset):
         queued = 0
         skipped = 0

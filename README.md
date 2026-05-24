@@ -70,7 +70,7 @@ python manage.py runserver
 On Windows use `-P solo` to avoid `billiard` pool failures.
 
 ```powershell
-python -m celery -A gift_idea_generator worker -l info -Q discovery,prices,verification -P solo
+python -m celery -A gift_idea_generator worker -l info -Q discovery -P solo
 ```
 
 ### 8. Start Celery beat

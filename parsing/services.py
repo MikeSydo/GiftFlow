@@ -334,11 +334,6 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
     ).first()
     created = gift is None
 
-    price_floor = summary.price
-    price_ceiling = summary.original_price or summary.price
-    if price_floor is not None and price_ceiling is not None and price_ceiling < price_floor:
-        price_ceiling = price_floor
-
     if gift is None:
         name = build_unique_gift_name(summary.title, source_product_id=source_product_id)
         gift = Gift(
@@ -372,15 +367,12 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
         "source_product_url": summary.product_url[:500],
         "is_active": True,
     }
-    if created or price_floor is not None:
-        field_values["min_price"] = price_floor
-        field_values["max_price"] = price_ceiling
     for field, value in field_values.items():
         if getattr(gift, field) != value:
             setattr(gift, field, value)
             changed_fields.append(field)
 
-    should_cache_image = getattr(summary, "needs_product_refresh", True)
+    should_cache_image = getattr(summary, "can_cache_image", True)
 
     if created:
         if should_cache_image:
@@ -413,8 +405,6 @@ def get_active_ingestion_run(
     task_type: str,
     *,
     seed_key: str = "",
-    gift_id: int | None = None,
-    source_product_id: str = "",
 ) -> IngestionRun | None:
     queryset = IngestionRun.objects.filter(
         task_type=task_type,
@@ -422,10 +412,6 @@ def get_active_ingestion_run(
     )
     if seed_key:
         queryset = queryset.filter(seed_key=seed_key)
-    if gift_id is not None:
-        queryset = queryset.filter(gift_id=gift_id)
-    if source_product_id:
-        queryset = queryset.filter(source_product_id=source_product_id)
     return queryset.order_by("-created_at", "-id").first()
 
 
@@ -433,14 +419,10 @@ def create_ingestion_run(
     task_type: str,
     *,
     seed_key: str = "",
-    gift: Gift | None = None,
-    source_product_id: str = "",
 ) -> IngestionRun:
     return IngestionRun.objects.create(
         task_type=task_type,
         seed_key=seed_key,
-        gift=gift,
-        source_product_id=source_product_id or (gift.source_product_id if gift else ""),
         status=IngestionRun.STATUS_PENDING,
     )
 

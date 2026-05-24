@@ -72,7 +72,7 @@ services:
   celery_worker:
     build: .
     container_name: gift_flow_celery_worker
-    command: celery -A gift_idea_generator worker -l info -Q discovery,prices,verification
+    command: celery -A gift_idea_generator worker -l info -Q discovery
     volumes:
       - .:/app
     environment:

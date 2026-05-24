@@ -50,7 +50,6 @@ class HotlineSeed(models.Model):
 
 class IngestionRun(models.Model):
     TASK_TYPE_SEED_REFRESH = "seed_refresh"
-    TASK_TYPE_PRODUCT_REFRESH = "product_refresh"
 
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
@@ -59,7 +58,6 @@ class IngestionRun(models.Model):
 
     TASK_TYPE_CHOICES = [
         (TASK_TYPE_SEED_REFRESH, "Seed refresh"),
-        (TASK_TYPE_PRODUCT_REFRESH, "Product refresh"),
     ]
 
     STATUS_CHOICES = [
@@ -75,19 +73,6 @@ class IngestionRun(models.Model):
         db_index=True,
     )
     seed_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
-    gift = models.ForeignKey(
-        "gifts.Gift",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="ingestion_runs",
-    )
-    source_product_id = models.CharField(
-        max_length=200,
-        blank=True,
-        default="",
-        db_index=True,
-    )
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -114,12 +99,8 @@ class IngestionRun(models.Model):
                 fields=["task_type", "seed_key", "-updated_at"],
                 name="search_inge_task_ty_6bb6cc_idx",
             ),
-            models.Index(
-                fields=["task_type", "source_product_id", "-updated_at"],
-                name="search_inge_task_ty_850850_idx",
-            ),
         ]
 
     def __str__(self):
-        target = self.seed_key or self.source_product_id or self.gift_id or "-"
+        target = self.seed_key or "-"
         return f"{self.task_type}:{target} [{self.status}]"

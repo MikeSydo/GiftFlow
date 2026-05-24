@@ -1,7 +1,6 @@
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from decimal import Decimal
 from unittest.mock import patch
 
 from django.core.files.base import ContentFile
@@ -199,7 +198,7 @@ class PurgeMediaStorageCommandTestCase(TestCase):
         storage = FakeS3Storage(
             [
                 "media/gifts/a.jpg",
-                "media/shops/logo.png",
+                "media/misc/logo.png",
                 "other/gifts/b.jpg",
             ],
         )
@@ -210,7 +209,7 @@ class PurgeMediaStorageCommandTestCase(TestCase):
 
         value = output.getvalue()
         self.assertIn("Would delete: media/gifts/a.jpg", value)
-        self.assertIn("Would delete: media/shops/logo.png", value)
+        self.assertIn("Would delete: media/misc/logo.png", value)
         self.assertNotIn("other/gifts/b.jpg", value)
         self.assertIn("would_delete=2", value)
         self.assertEqual(storage.deleted_names, [])
@@ -219,7 +218,7 @@ class PurgeMediaStorageCommandTestCase(TestCase):
         storage = FakeS3Storage(
             [
                 "media/gifts/a.jpg",
-                "media/shops/logo.png",
+                "media/misc/logo.png",
                 "other/gifts/b.jpg",
             ],
         )
@@ -230,7 +229,7 @@ class PurgeMediaStorageCommandTestCase(TestCase):
 
         self.assertEqual(
             storage.deleted_names,
-            ["gifts/a.jpg", "shops/logo.png"],
+            ["gifts/a.jpg", "misc/logo.png"],
         )
         self.assertIn("deleted=2", output.getvalue())
 
@@ -329,8 +328,6 @@ class GiftDetailViewTestCase(TestCase):
             gender="U",
             age_min=0,
             age_max=100,
-            min_price=Decimal("19499.00"),
-            max_price=Decimal("20599.00"),
             is_active=True,
         )
 

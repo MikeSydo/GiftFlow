@@ -240,7 +240,7 @@ def enqueue_missing_hotline_seed_refreshes() -> int:
 
 @shared_task(queue="discovery", rate_limit="2/m")
 def refresh_hotline_seed(run_id: int) -> None:
-    run = IngestionRun.objects.select_related("gift").get(id=run_id)
+    run = IngestionRun.objects.get(id=run_id)
     seed = get_hotline_seed(run.seed_key)
 
     if hotline_seed_refresh_paused():
@@ -266,7 +266,6 @@ def refresh_hotline_seed(run_id: int) -> None:
                     fallback_summaries = adapter.search_suggestions(fallback_query)
                     summaries = filter_hotline_seed_summaries(seed, fallback_summaries)
                     if summaries:
-                        summaries = adapter.enrich_product_prices(summaries)
                         logger.info(
                             "[hotline] seed refresh used JSON-RPC fallback query=%s seed=%s",
                             fallback_query,

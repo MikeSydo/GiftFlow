@@ -1,4 +1,4 @@
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.urls import reverse
 from django.utils.text import slugify
@@ -95,11 +95,6 @@ class Gift(models.Model):
     gender = models.CharField(max_length=1, choices=GENDER_TYPES, default="U")
     age_min = models.PositiveIntegerField(default=0, validators=[MaxValueValidator(100)], verbose_name="Age min")
     age_max = models.PositiveIntegerField(default=100, validators=[MaxValueValidator(100)],verbose_name="Age max")
-    min_price = models.DecimalField(max_digits=20, decimal_places=2, validators=[MinValueValidator(0)],
-                                    null=True, blank=True, verbose_name="Min price")
-    max_price = models.DecimalField(max_digits=20, decimal_places=2, validators=[MinValueValidator(0)],
-                                    null=True, blank=True, verbose_name="Max price")
-
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     tags = models.ManyToManyField(Tag, blank=True)
 
@@ -135,7 +130,6 @@ class Gift(models.Model):
         indexes = [
             models.Index(fields=['slug']),
             models.Index(fields=['gender', 'age_min', 'age_max']),
-            models.Index(fields=['min_price', 'max_price']),
             models.Index(fields=['-popularity_score', '-created_at']),
             models.Index(fields=['is_active', 'is_featured']),
             models.Index(

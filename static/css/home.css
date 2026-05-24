@@ -298,13 +298,6 @@ ul {
   line-height: 1.3;
 }
 
-.catalog-card__price {
-  font-size: 11px;
-  color: var(--clr-accent);
-  font-weight: 600;
-  margin-top: 3px;
-}
-
 /* Nav actions */
 .nav-actions {
   display: flex;
@@ -643,12 +636,6 @@ ul {
   border-top: 1px solid var(--clr-border);
 }
 
-.featured-card__price {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--clr-accent);
-}
-
 .featured-card__link {
   font-size: 13px;
   font-weight: 600;
@@ -734,12 +721,6 @@ ul {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.gift-card__price {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--clr-accent);
 }
 
 .gift-card__link {

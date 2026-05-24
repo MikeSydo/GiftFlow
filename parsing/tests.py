@@ -7,7 +7,6 @@ from django.test import TestCase, RequestFactory
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
-from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -45,16 +44,6 @@ class IngestionRunAdminActionTestCase(TestCase):
         self.request = RequestFactory().post("/admin/search/ingestionrun/")
         self.model_admin = IngestionRunAdmin(IngestionRun, admin.site)
         self.model_admin.message_user = Mock()
-        self.gift = Gift.objects.create(
-            name="Steam Deck Admin",
-            slug="steam-deck-admin",
-            gender="U",
-            age_min=0,
-            age_max=100,
-            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
-            source_product_id="21916104",
-            source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
-        )
         self.seed = DbHotlineSeed.objects.create(
             key="gaming-gamepads",
             query="gamepad",
@@ -86,22 +75,6 @@ class IngestionRunAdminActionTestCase(TestCase):
 
         mocked_queue.assert_called_once_with("gaming-gamepads")
         self.model_admin.message_user.assert_called_once()
-
-    def test_requeue_selected_runs_skips_removed_product_refreshes(self):
-        run = IngestionRun.objects.create(
-            task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
-            gift=self.gift,
-            source_product_id=self.gift.source_product_id,
-            status=IngestionRun.STATUS_COMPLETED,
-        )
-
-        self.model_admin.requeue_selected_runs(
-            self.request,
-            IngestionRun.objects.filter(id=run.id),
-        )
-
-        self.model_admin.message_user.assert_called_once()
-        self.assertIn("Skipped 1", self.model_admin.message_user.call_args.args[1])
 
     @patch("parsing.admin.queue_hotline_seed_refresh")
     def test_queue_all_hotline_seed_refreshes_queues_each_seed(self, mocked_queue):
@@ -290,24 +263,10 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         adapter.search_suggestions.return_value = [
             HotlineOffer(
                 external_product_id="25806754",
-                external_offer_id="hotline-product-25806754",
                 title="Зарядна станція EcoFlow DELTA 3 EU-Version",
                 product_url="https://hotline.ua/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
                 image_url="https://hotline.ua/img/tx/507/5070515241.jpg",
-                price=None,
-                needs_product_refresh=False,
-            )
-        ]
-        adapter.enrich_product_prices.return_value = [
-            HotlineOffer(
-                external_product_id="25806754",
-                external_offer_id="hotline-product-25806754",
-                title="Зарядна станція EcoFlow DELTA 3 EU-Version",
-                product_url="https://hotline.ua/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
-                image_url="https://hotline.ua/img/tx/507/5070515241.jpg",
-                price=Decimal("23999"),
-                original_price=Decimal("28999"),
-                needs_product_refresh=False,
+                can_cache_image=False,
             )
         ]
 
@@ -319,16 +278,7 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         self.assertEqual(run.updated_count, 1)
         gift = Gift.objects.get(source_product_id="25806754")
         self.assertEqual(gift.catalog_source, Gift.CATALOG_SOURCE_HOTLINE)
-        self.assertEqual(gift.min_price, Decimal("23999"))
-        self.assertEqual(gift.max_price, Decimal("28999"))
-        self.assertFalse(
-            IngestionRun.objects.filter(
-                task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
-                source_product_id="25806754",
-            ).exists()
-        )
         mocked_cache_image.assert_not_called()
-        adapter.enrich_product_prices.assert_called_once()
 
     def test_seed_fallback_queries_include_short_meaningful_query(self):
         seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
@@ -358,21 +308,17 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         seed.source_url = "https://hotline.ua/ua/av/televizory/26206/"
         television = HotlineOffer(
             external_product_id="25526866",
-            external_offer_id="hotline-product-25526866",
             title="NanoCell телевізор LG 43NANO81",
             product_url="https://hotline.ua/av-televizory/lg-43nano81/",
             image_url=None,
-            price=None,
-            needs_product_refresh=False,
+            can_cache_image=False,
         )
         tire = HotlineOffer(
             external_product_id="302755",
-            external_offer_id="hotline-product-302755",
             title="Всесезонні шини Matador MPS 400",
             product_url="https://hotline.ua/auto/avtoshiny-i-motoshiny/302755/",
             image_url=None,
-            price=None,
-            needs_product_refresh=False,
+            can_cache_image=False,
         )
 
         self.assertEqual(filter_hotline_seed_summaries(seed, [television, tire]), [television])
@@ -404,17 +350,13 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
             [
                 HotlineOffer(
                     external_product_id="13477649",
-                    external_offer_id="hotline-product-13477649",
                     title="Ваги підлогові електронні Xiaomi Mi Body Composition Scale S400 White",
                     product_url="https://hotline.ua/bt-vesy-napolnye/xiaomi-mi-body-composition-scale/",
                     image_url="https://hotline.ua/img/tx/309/3095555895.jpg",
-                    price=None,
-                    needs_product_refresh=False,
+                    can_cache_image=False,
                 )
             ],
         ]
-        adapter.enrich_product_prices.side_effect = lambda summaries: summaries
-
         refresh_hotline_seed(run.id)
 
         self.assertEqual(adapter.search_suggestions.call_args_list[0].args[0], seed.query)
@@ -441,12 +383,10 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         adapter.search_suggestions.return_value = [
             HotlineOffer(
                 external_product_id="302755",
-                external_offer_id="hotline-product-302755",
                 title="Tire 400",
                 product_url="https://hotline.ua/auto/avtoshiny-i-motoshiny/302755/",
                 image_url=None,
-                price=None,
-                needs_product_refresh=False,
+                can_cache_image=False,
             )
         ]
 
@@ -566,7 +506,7 @@ class HotlineSeedAdminActionTestCase(TestCase):
         mocked_queue.assert_called_once_with(seed.pk)
 
 
-class HotlineProductOfferParserTestCase(TestCase):
+class HotlineProductSummaryParserTestCase(TestCase):
     def test_parse_search_html_fixture_extracts_hotline_product_summaries(self):
         html = (FIXTURE_DIR / "hotline_search_nuxt.html").read_text(encoding="utf-8")
 
@@ -574,7 +514,6 @@ class HotlineProductOfferParserTestCase(TestCase):
 
         self.assertEqual(len(offers), 2)
         self.assertEqual(offers[0].external_product_id, "21916104")
-        self.assertEqual(offers[0].external_offer_id, "hotline-product-21916104")
         self.assertEqual(offers[0].title, "Steam Deck 256 GB")
         self.assertEqual(
             offers[0].product_url,
@@ -587,12 +526,6 @@ class HotlineProductOfferParserTestCase(TestCase):
 
         with self.assertRaises(HotlineChallengeError):
             HotlineAdapter()._parse_search_html(html)
-
-    def test_parse_product_html_raises_for_hotline_challenge(self):
-        html = (FIXTURE_DIR / "hotline_challenge.html").read_text(encoding="utf-8")
-
-        with self.assertRaises(HotlineChallengeError):
-            HotlineAdapter()._parse_product_html(html, external_product_id="21916104")
 
     def test_search_category_fetches_pages_until_no_new_products(self):
         html = (FIXTURE_DIR / "hotline_search_nuxt.html").read_text(encoding="utf-8")
@@ -619,9 +552,6 @@ class HotlineProductOfferParserTestCase(TestCase):
             client.get.call_args_list[1].args[0],
             "https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/?p=2",
         )
-        self.assertEqual(offers[0].price, Decimal("19499"))
-        self.assertEqual(offers[0].original_price, Decimal("21395"))
-
     def test_parse_search_suggestions_extracts_basic_product_summaries(self):
         payload = {
             "jsonrpc": "2.0",
@@ -632,8 +562,6 @@ class HotlineProductOfferParserTestCase(TestCase):
                     "title": "Зарядна станція EcoFlow DELTA 3 EU-Version",
                     "url": "/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
                     "imagePath": "/img/tx/507/5070515241.jpg",
-                    "minPrice": 23999,
-                    "maxPrice": 28999,
                     "currentEntity": "products",
                 },
                 {
@@ -654,126 +582,7 @@ class HotlineProductOfferParserTestCase(TestCase):
             "https://hotline.ua/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
         )
         self.assertEqual(offers[0].image_url, "https://hotline.ua/img/tx/507/5070515241.jpg")
-        self.assertEqual(offers[0].price, Decimal("23999"))
-        self.assertEqual(offers[0].original_price, Decimal("28999"))
-        self.assertFalse(offers[0].needs_product_refresh)
-
-    def test_parse_product_price_range_extracts_aggregate_offer(self):
-        html = """
-        <script type="application/ld+json">
-        {"@type":"Product","offers":{"@type":"AggregateOffer","lowPrice":10699,"highPrice":15754.21,"priceCurrency":"UAH"}}
-        </script>
-        """
-
-        price, original_price = HotlineAdapter()._parse_product_price_range(html)
-
-        self.assertEqual(price, Decimal("10699"))
-        self.assertEqual(original_price, Decimal("15754.21"))
-
-    def test_parse_product_html_fixture_extracts_merchant_offers(self):
-        html = (FIXTURE_DIR / "hotline_product_nuxt.html").read_text(encoding="utf-8")
-
-        offers = HotlineAdapter()._parse_product_html(html, external_product_id="21916104")
-
-        self.assertEqual(len(offers), 2)
-        self.assertEqual(offers[0].external_offer_id, "101")
-        self.assertEqual(offers[0].seller_name, "GRO")
-        self.assertEqual(offers[0].seller_external_id, "77")
-        self.assertEqual(offers[0].seller_url, "https://gro.ua")
-        self.assertEqual(offers[0].seller_logo_url, "https://hotline.ua/img/shops/gro-logo.png")
-        self.assertEqual(offers[0].original_price, Decimal("21395"))
-        self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
-
-    def test_parse_product_html_extracts_merchant_offers_and_old_price(self):
-        html = """
-        <script>
-        window.__NUXT__={offers:{edges:[
-            {node:{_id:"101",conversionUrl:"\\u002Fgo\\u002Fprice\\u002F101\\u002F",descriptionShort:"Steam Deck 256 GB",firmId:77,firmTitle:"GRO",firmExtraInfo:{website:"gro.ua"},price:19499,visible:true}},
-            {node:{_id:"102",conversionUrl:"\\u002Fgo\\u002Fprice\\u002F102\\u002F",descriptionFull:"Steam Deck 256 GB",firmId:78,firmTitle:"UPPS.UA",firmExtraInfo:{website:"upps.ua"},price:20599,visible:true}}
-        ],pageInfo:{}},sales:{sales:{"101":{oldPrice:21395}}}};
-        </script>
-        """
-
-        adapter = HotlineAdapter()
-        offers = adapter._parse_product_html(html, external_product_id="21916104")
-
-        self.assertEqual(len(offers), 2)
-        self.assertEqual(offers[0].external_offer_id, "101")
-        self.assertEqual(offers[0].seller_name, "GRO")
-        self.assertEqual(offers[0].seller_url, "https://gro.ua")
-        self.assertEqual(offers[0].original_price, Decimal("21395"))
-        self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
-
-    @override_settings(HOTLINE_REQUEST_TOKEN="valid-token", HOTLINE_CITY_ID=188, HOTLINE_COOKIE_HEADER="hl_sid=1")
-    def test_fetch_product_offers_graphql_extracts_merchant_offers(self):
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
-            "data": {
-                "byPathQueryProduct": {
-                    "id": "25526866",
-                    "offers": {
-                        "totalCount": 1,
-                        "edges": [
-                            {
-                                "node": {
-                                    "_id": "101",
-                                    "conversionUrl": "/go/price/101/",
-                                    "descriptionShort": "LG 43NANO81",
-                                    "firmId": 77,
-                                    "firmLogo": "/img/shops/logo.png",
-                                    "firmTitle": "GRO",
-                                    "firmExtraInfo": {"website": "gro.ua"},
-                                    "price": 14999,
-                                }
-                            }
-                        ],
-                    },
-                }
-            }
-        }
-        client = Mock()
-        client.post.return_value = response
-
-        offers = HotlineAdapter(client=client).fetch_product_offers_graphql(
-            product_path="av-televizory/lg-43nano81",
-            product_url="https://hotline.ua/av-televizory/lg-43nano81/",
-            external_product_id="25526866",
-        )
-
-        self.assertEqual(len(offers), 1)
-        self.assertEqual(offers[0].external_offer_id, "101")
-        self.assertEqual(offers[0].seller_name, "GRO")
-        self.assertEqual(offers[0].seller_url, "https://gro.ua")
-        self.assertEqual(offers[0].seller_logo_url, "https://hotline.ua/img/shops/logo.png")
-        self.assertEqual(offers[0].price, Decimal("14999"))
-        request = client.post.call_args
-        self.assertEqual(request.kwargs["json"]["variables"]["path"], "av-televizory/lg-43nano81")
-        self.assertEqual(request.kwargs["json"]["variables"]["cityId"], 188)
-        self.assertEqual(request.kwargs["headers"]["x-token"], "valid-token")
-        self.assertEqual(request.kwargs["headers"]["Cookie"], "hl_sid=1")
-
-    @override_settings(HOTLINE_REQUEST_TOKEN="")
-    def test_fetch_product_offers_graphql_requires_request_token(self):
-        with self.assertRaises(HotlineChallengeError):
-            HotlineAdapter(client=Mock()).fetch_product_offers_graphql(
-                product_path="av-televizory/lg-43nano81",
-                product_url="https://hotline.ua/av-televizory/lg-43nano81/",
-                external_product_id="25526866",
-            )
-
-    @override_settings(HOTLINE_REQUEST_TOKEN="bad-token")
-    def test_parse_product_offers_graphql_raises_for_invalid_token(self):
-        payload = {
-            "errors": [{"message": "invalid-request-token"}],
-            "data": {"byPathQueryProduct": None},
-        }
-
-        with self.assertRaises(HotlineChallengeError):
-            HotlineAdapter()._parse_product_offers_graphql(
-                payload,
-                external_product_id="25526866",
-            )
+        self.assertFalse(offers[0].can_cache_image)
 
 
 class HotlineGiftImageCacheTestCase(TestCase):
@@ -805,12 +614,9 @@ class HotlineGiftImageCacheTestCase(TestCase):
     def _summary(image_url="https://hotline.ua/img/gamepad.jpg"):
         return HotlineOffer(
             external_product_id="659422",
-            external_offer_id="hotline-product-659422",
             title="Gamepad Xbox Wireless",
             product_url="https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/659422/",
             image_url=image_url,
-            price=Decimal("2199"),
-            original_price=Decimal("2599"),
         )
 
     @patch("parsing.services.httpx.Client")
@@ -898,40 +704,6 @@ class HotlineGiftImageCacheTestCase(TestCase):
         self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
         self.assertFalse(gift.image)
 
-    @patch("parsing.services.httpx.Client")
-    def test_upsert_hotline_gift_does_not_clear_existing_price_when_summary_has_no_price(self, mocked_client):
-        mocked_client.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError(
-            "network failed",
-        )
-        seed = self._seed()
-        gift = Gift.objects.create(
-            name="Gamepad Xbox Wireless",
-            slug="gamepad-xbox-wireless",
-            gender="U",
-            age_min=0,
-            age_max=100,
-            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
-            source_product_id="659422",
-            min_price=Decimal("2199"),
-            max_price=Decimal("2599"),
-        )
-        summary = HotlineOffer(
-            external_product_id="659422",
-            external_offer_id="hotline-product-659422",
-            title="Gamepad Xbox Wireless",
-            product_url="https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/659422/",
-            image_url=None,
-            price=None,
-            needs_product_refresh=False,
-        )
-
-        upserted, _, changed = upsert_hotline_gift_from_summary(seed, summary)
-
-        self.assertEqual(upserted.id, gift.id)
-        self.assertTrue(changed)
-        upserted.refresh_from_db()
-        self.assertEqual(upserted.min_price, Decimal("2199.00"))
-        self.assertEqual(upserted.max_price, Decimal("2599.00"))
 
     @patch("parsing.services.httpx.Client")
     def test_cache_hotline_images_command_caches_existing_image_urls(self, mocked_client):
