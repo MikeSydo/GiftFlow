@@ -3,11 +3,10 @@
 GiftFlow now runs with a single active ingestion architecture:
 
 - `Celery beat` schedules Hotline catalog refreshes
-- `Celery worker` ingests Hotline seed results and product offers
+- `Celery worker` ingests Hotline seed results
 - `Gift` stores canonical Hotline products
-- `Shop` and `ProductLink` store merchant offers parsed from Hotline product pages
 - `/search/api/` reads only the local database
-- `/gifts/<slug>/` shows the store list for one gift
+- `/gifts/<slug>/` shows one canonical gift
 
 ## Local setup
 
@@ -87,7 +86,7 @@ Run the local checks before committing development changes:
 ```powershell
 python manage.py check
 python manage.py makemigrations --check --dry-run
-python manage.py test gifts search shops -v 1
+python manage.py test gifts search parsing -v 1
 ```
 
 If the local virtual environment is not available, run the same checks in the
@@ -96,7 +95,7 @@ Docker web image:
 ```powershell
 docker compose run --rm web python manage.py check
 docker compose run --rm web python manage.py makemigrations --check --dry-run
-docker compose run --rm web python manage.py test gifts search shops -v 1
+docker compose run --rm web python manage.py test gifts search parsing -v 1
 ```
 
 ## Media storage
@@ -124,9 +123,9 @@ For AWS S3, set the real bucket region in `MEDIA_S3_REGION_NAME` and leave
 set the R2 S3 API endpoint. `MEDIA_S3_CUSTOM_DOMAIN` is optional, but recommended
 for public image URLs.
 
-Existing database values for `Gift.image`, `GiftImage.image`, and `Shop.logo`
-are relative file paths. After switching `MEDIA_STORAGE_BACKEND=s3`, copy the
-existing local files into the bucket without changing database rows:
+Existing database values for `Gift.image` are relative file paths. After
+switching `MEDIA_STORAGE_BACKEND=s3`, copy the existing local files into the
+bucket without changing database rows:
 
 ```powershell
 python manage.py copy_media_to_storage --dry-run
@@ -134,8 +133,7 @@ python manage.py copy_media_to_storage
 ```
 
 The command reads from local `MEDIA_ROOT` and writes to the active default
-storage. It does not copy external Hotline URLs from `Gift.image_url` or
-`ProductLink.image_url`.
+storage. It does not copy external Hotline URLs from `Gift.image_url`.
 
 Hotline seed refreshes cache newly discovered product images into `Gift.image`
 through the configured default storage. With `MEDIA_STORAGE_BACKEND=s3`, these
@@ -168,9 +166,6 @@ worker then:
 
 1. pulls Hotline seed/category results
 2. upserts canonical `Gift` records
-3. enqueues product refresh tasks
-4. parses merchant offers from Hotline product pages
-5. upserts `Shop`, `ProductLink`, and `PriceHistory`
 
 ## Active scheduled flow
 
@@ -178,7 +173,6 @@ worker then:
 
 - cold-start bootstrap guard every 5 minutes
 - seed refresh every 6 hours
-- stale product refresh every hour in batches of 100
 
 When `Celery beat` starts, it also queues one cold-start bootstrap check. The
 check queues only active admin-managed Hotline seeds that do not already have a
@@ -189,8 +183,8 @@ requeueing the whole catalog on every normal restart.
 ## Search and detail flow
 
 - `/search/api/` returns only DB-backed gift results
-- search result cards open `/gifts/<slug>/`
-- the gift detail page shows sorted merchant offers and outbound shop links
+- search result cards can open `/gifts/<slug>/` when the UI enables detail links
+- the gift detail page shows canonical gift data without merchant offers
 
 If the catalog is empty, run the bootstrap command and wait for the worker to finish the first ingestion cycle.
 
@@ -206,9 +200,8 @@ refreshed local database:
 5. Queue the initial Hotline catalog bootstrap.
 6. Confirm that `IngestionRun` records move to `completed` in Django admin.
 7. Confirm that `/search/` loads categories and returns DB-backed results.
-8. Confirm that `/search/api/` returns gifts with `detail_url` and `best_offer`.
-9. Open a `/gifts/<slug>/` page and confirm merchant offers are sorted by live cheapest price first.
-10. Click an offer and confirm the `/api/shops/products/<id>/click/` endpoint records a `ShopClick`.
+8. Confirm that `/search/api/` returns gifts.
+9. Open a `/gifts/<slug>/` page and confirm the canonical gift renders.
 
 Useful commands:
 
@@ -282,8 +275,7 @@ docker compose logs -f celery_beat celery_worker
 ```
 
 Then confirm that `/search/`, `/search/api/`, and several `/gifts/<slug>/`
-pages show DB-backed gifts and sorted merchant offers across multiple
-categories.
+pages show DB-backed gifts across multiple categories.
 
 Keep deploy work separate from this checklist. Deployment can start after the
 checks above pass and the test commands in the verification section are green.
