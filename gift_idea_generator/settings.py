@@ -184,7 +184,6 @@ INSTALLED_APPS = [
 
     'gift_idea_generator',
     'gifts',
-    'shops',
     'home',
     'parsing.apps.ParsingConfig',
 ]
@@ -281,6 +280,15 @@ STORAGES = {
 }
 
 # Celery
+HOTLINE_CHALLENGE_COOLDOWN_MINUTES = int(os.getenv("HOTLINE_CHALLENGE_COOLDOWN_MINUTES", "60"))
+HOTLINE_SEARCH_SUGGESTION_FALLBACK = os.getenv("HOTLINE_SEARCH_SUGGESTION_FALLBACK", "True").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+HOTLINE_CITY_ID = int(os.getenv("HOTLINE_CITY_ID", "188"))
+HOTLINE_REQUEST_TOKEN = os.getenv("HOTLINE_REQUEST_TOKEN", "")
+HOTLINE_COOKIE_HEADER = os.getenv("HOTLINE_COOKIE_HEADER", "")
 CELERY_BROKER_URL = build_redis_url()
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ['json']
@@ -290,13 +298,7 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ROUTES = {
     'parsing.tasks.enqueue_missing_hotline_seed_refreshes': {'queue': 'discovery'},
     'parsing.tasks.enqueue_hotline_seed_refreshes': {'queue': 'discovery'},
-    'parsing.tasks.enqueue_stale_hotline_product_refreshes': {'queue': 'prices'},
     'parsing.tasks.refresh_hotline_seed': {'queue': 'discovery'},
-    'parsing.tasks.refresh_hotline_product': {'queue': 'prices'},
-    'shops.tasks.update_gift_price_cache': {'queue': 'prices'},
-    'shops.tasks.verify_product_link': {'queue': 'verification'},
-    'shops.tasks.increment_shop_click': {'queue': 'prices'},
-    'shops.tasks.trigger_all_verifications': {'queue': 'verification'},
 }
 
 CELERY_BEAT_SCHEDULE = {
@@ -306,15 +308,6 @@ CELERY_BEAT_SCHEDULE = {
     },
     "hotline-seed-refresh": {
         "task": "parsing.tasks.enqueue_hotline_seed_refreshes",
-        "schedule": timedelta(hours=6),
-    },
-    "hotline-stale-product-refresh": {
-        "task": "parsing.tasks.enqueue_stale_hotline_product_refreshes",
-        "schedule": timedelta(hours=1),
-        "args": (100,),
-    },
-    "product-link-verification": {
-        "task": "shops.tasks.trigger_all_verifications",
         "schedule": timedelta(hours=6),
     },
 }
@@ -344,11 +337,6 @@ LOGGING = {
         },
     },
     'loggers': {
-        'shops.tasks': {
-            'handlers': ['console', 'scraper_file'],
-            'level': DJANGO_LOG_LEVEL,
-            'propagate': False,
-        },
         'parsing.hotline': {
             'handlers': ['console', 'scraper_file'],
             'level': DJANGO_LOG_LEVEL,

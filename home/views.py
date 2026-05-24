@@ -1,5 +1,6 @@
 from django.shortcuts import render
 from gifts.models import Gift, Category
+from gifts.views import _deduplicate_categories_by_name
 
 
 def home(request):
@@ -23,8 +24,8 @@ def home(request):
         catalog_data.append(
             {
                 "category": cat,
-                "subcategories": cat.subcategories.filter(is_active=True).order_by(
-                    "order", "name"
+                "subcategories": _deduplicate_categories_by_name(
+                    cat.subcategories.filter(is_active=True).order_by("name", "order", "id")
                 ),
                 "gifts": top_gifts,
             }

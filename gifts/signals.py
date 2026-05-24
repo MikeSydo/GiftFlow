@@ -3,7 +3,7 @@ import logging
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from .models import Gift, GiftImage
+from .models import Gift
 
 
 logger = logging.getLogger("gifts.signals")
@@ -59,19 +59,4 @@ def gift_post_save(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=Gift)
 def gift_post_delete(sender, instance, **kwargs):
-    _delete_file(instance.image)
-
-
-@receiver(pre_save, sender=GiftImage)
-def giftimage_pre_save(sender, instance, **kwargs):
-    _capture_previous_file(instance, "image")
-
-
-@receiver(post_save, sender=GiftImage)
-def giftimage_post_save(sender, instance, **kwargs):
-    _delete_replaced_file(instance, "image")
-
-
-@receiver(post_delete, sender=GiftImage)
-def giftimage_post_delete(sender, instance, **kwargs):
     _delete_file(instance.image)

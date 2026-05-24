@@ -271,11 +271,11 @@ ul {
   transition: box-shadow var(--transition), transform var(--transition);
   text-decoration: none;
   color: var(--clr-text);
+  cursor: default;
 }
 
 .catalog-card:hover {
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
 }
 
 .catalog-card__img {
@@ -659,6 +659,13 @@ ul {
 
 .featured-card__link:hover {
   transform: translateX(4px);
+}
+
+.featured-card__link--disabled,
+.gift-card__link--disabled {
+  cursor: default;
+  opacity: .65;
+  pointer-events: none;
 }
 
 /* Catalog gift cards */

@@ -55,7 +55,7 @@
               </a>
               {% empty %}
               {% for gift in item.gifts %}
-              <a href="{% url 'gifts:gift_detail' gift.slug %}" class="catalog-card">
+              <article class="catalog-card">
                 {% if gift.image %}
                 <img src="{{ gift.image.url }}" alt="{{ gift.name }}" class="catalog-card__img" />
                 {% else %}
@@ -67,7 +67,7 @@
                   <span class="catalog-card__price">від {{ gift.min_price }} ₴</span>
                   {% endif %}
                 </div>
-              </a>
+              </article>
               {% endfor %}
               {% endfor %}
             </div>
@@ -136,7 +136,7 @@
               {% if gift.min_price %}
               <span class="featured-card__price">від {{ gift.min_price }} ₴</span>
               {% endif %}
-              <a href="{% url 'gifts:gift_detail' gift.slug %}" class="featured-card__link">Переглянути -></a>
+              <span class="featured-card__link featured-card__link--disabled">Переглянути -></span>
             </div>
           </div>
         </article>
@@ -175,7 +175,7 @@
               {% if gift.min_price %}
               <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
               {% endif %}
-              <a href="{% url 'gifts:gift_detail' gift.slug %}" class="gift-card__link">→</a>
+              <span class="gift-card__link gift-card__link--disabled">→</span>
             </div>
           </div>
         </article>

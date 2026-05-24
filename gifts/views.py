@@ -1,18 +1,28 @@
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, redirect, render
 
-from shops.models import ProductLink
-
 from .models import Category, Gift
 
 
+def _deduplicate_categories_by_name(categories):
+    deduplicated = []
+    seen_names = set()
+    for category in categories:
+        normalized_name = " ".join(category.name.split()).casefold()
+        if normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        deduplicated.append(category)
+    return deduplicated
+
+
 def _top_level_categories():
-    return (
+    categories = list(
         Category.objects.filter(is_active=True, parent__isnull=True)
         .prefetch_related(
             Prefetch(
                 "subcategories",
-                queryset=Category.objects.filter(is_active=True).order_by("order", "name"),
+                queryset=Category.objects.filter(is_active=True).order_by("name", "order", "id"),
             )
         )
         .order_by(
@@ -20,6 +30,9 @@ def _top_level_categories():
             "name",
         )
     )
+    for category in categories:
+        category.visible_subcategories = _deduplicate_categories_by_name(category.subcategories.all())
+    return categories
 
 
 def parent_category_detail(request, parent_slug):
@@ -40,9 +53,8 @@ def parent_category_detail(request, parent_slug):
         .prefetch_related("tags")
         .order_by("-popularity_score", "-created_at")
     )
-    subcategories = category.subcategories.filter(is_active=True).order_by(
-        "order",
-        "name",
+    subcategories = _deduplicate_categories_by_name(
+        category.subcategories.filter(is_active=True).order_by("name", "order", "id")
     )
 
     return render(
@@ -87,9 +99,8 @@ def subcategory_detail(request, parent_slug, subcategory_slug):
             "category": category,
             "parent_category": parent,
             "gifts": gifts,
-            "subcategories": parent.subcategories.filter(is_active=True).order_by(
-                "order",
-                "name",
+            "subcategories": _deduplicate_categories_by_name(
+                parent.subcategories.filter(is_active=True).order_by("name", "order", "id")
             ),
             "all_categories": _top_level_categories(),
             "current_top_category": parent,
@@ -103,26 +114,19 @@ def legacy_category_redirect(request, slug):
 
 
 def gift_detail(request, slug):
-    offers_qs = (
-        ProductLink.objects.select_related("shop")
-        .order_by("-in_stock", "price", "-shop__priority", "id")
-    )
     gift = get_object_or_404(
         Gift.objects.select_related("category").prefetch_related(
             "tags",
-            Prefetch("productlinks", queryset=offers_qs),
         ),
         slug=slug,
         is_active=True,
     )
 
-    offers = list(gift.productlinks.all())
     return render(
         request,
         "gifts/detail.html",
         {
             "gift": gift,
-            "offers": offers,
             "all_categories": _top_level_categories(),
             "current_top_category": gift.category.parent if gift.category and gift.category.parent_id else gift.category,
         },

@@ -16,20 +16,25 @@ from unittest.mock import Mock, patch
 import httpx
 
 from gifts.models import Gift, Category, Tag
-from shops.models import PriceHistory, ProductLink, Shop
 
-from .hotline import HotlineAdapter, HotlineMerchantOffer, HotlineOffer
+from .hotline import HotlineAdapter, HotlineChallengeError, HotlineOffer
 from .admin import HotlineSeedAdmin, IngestionRunAdmin
 from .models import HotlineSeed as DbHotlineSeed, IngestionRun
 from .seed_catalog import import_hotline_seed_templates
 from .seeds import HOTLINE_SEEDS, HotlineSeed
 from .services import (
-    cache_shop_logo,
     extract_hotline_og_image_url,
     resolve_hotline_product_image_url,
     upsert_hotline_gift_from_summary,
 )
-from .tasks import queue_missing_hotline_seed_refreshes, refresh_hotline_product
+from .tasks import (
+    queue_hotline_seed_refresh,
+    queue_missing_hotline_seed_refreshes,
+    hotline_seed_fallback_queries,
+    hotline_seed_product_path_prefixes,
+    filter_hotline_seed_summaries,
+    refresh_hotline_seed,
+)
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_fixtures"
 
@@ -82,8 +87,7 @@ class IngestionRunAdminActionTestCase(TestCase):
         mocked_queue.assert_called_once_with("gaming-gamepads")
         self.model_admin.message_user.assert_called_once()
 
-    @patch("parsing.admin.queue_hotline_product_refresh")
-    def test_requeue_selected_runs_queues_product_refresh_for_gift(self, mocked_queue):
+    def test_requeue_selected_runs_skips_removed_product_refreshes(self):
         run = IngestionRun.objects.create(
             task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
             gift=self.gift,
@@ -96,8 +100,8 @@ class IngestionRunAdminActionTestCase(TestCase):
             IngestionRun.objects.filter(id=run.id),
         )
 
-        mocked_queue.assert_called_once_with(self.gift)
         self.model_admin.message_user.assert_called_once()
+        self.assertIn("Skipped 1", self.model_admin.message_user.call_args.args[1])
 
     @patch("parsing.admin.queue_hotline_seed_refresh")
     def test_queue_all_hotline_seed_refreshes_queues_each_seed(self, mocked_queue):
@@ -192,6 +196,266 @@ class ColdStartHotlineBootstrapTestCase(TestCase):
         self.assertEqual(queued, len(HOTLINE_SEEDS) - 1)
         self.assertEqual(mocked_delay.call_count, len(HOTLINE_SEEDS) - 1)
         self.assertFalse(IngestionRun.objects.filter(seed_key=inactive_seed.key).exists())
+
+    @patch("parsing.tasks.refresh_hotline_seed.delay")
+    @override_settings(HOTLINE_SEARCH_SUGGESTION_FALLBACK=False)
+    def test_challenge_failure_pauses_cold_start_queueing(self, mocked_delay):
+        IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=HOTLINE_SEEDS[0].key,
+            status=IngestionRun.STATUS_FAILED,
+            last_error="Hotline returned a captcha/challenge page for search results.",
+            finished_at=timezone.now(),
+        )
+
+        queued = queue_missing_hotline_seed_refreshes()
+
+        self.assertEqual(queued, 0)
+        mocked_delay.assert_not_called()
+
+    @patch("parsing.tasks.refresh_hotline_seed.delay")
+    @override_settings(HOTLINE_SEARCH_SUGGESTION_FALLBACK=False)
+    def test_challenge_failure_pauses_direct_seed_queueing(self, mocked_delay):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+            status=IngestionRun.STATUS_FAILED,
+            last_error="Hotline returned a captcha/challenge page for search results.",
+            finished_at=timezone.now(),
+        )
+
+        run = queue_hotline_seed_refresh(seed)
+
+        self.assertIsNone(run)
+        mocked_delay.assert_not_called()
+
+    @patch("parsing.tasks.refresh_hotline_seed.delay")
+    def test_bootstrap_hotline_catalog_respects_limit(self, mocked_delay):
+        output = StringIO()
+
+        call_command("bootstrap_hotline_catalog", "--limit", "2", stdout=output)
+
+        self.assertEqual(
+            IngestionRun.objects.filter(
+                task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+                status=IngestionRun.STATUS_PENDING,
+            ).count(),
+            2,
+        )
+        self.assertEqual(mocked_delay.call_count, 2)
+        self.assertIn("Queued 2 Hotline seed refresh task(s).", output.getvalue())
+
+    @patch("parsing.tasks.HotlineAdapter")
+    @override_settings(HOTLINE_SEARCH_SUGGESTION_FALLBACK=False)
+    def test_queued_seed_refresh_skips_http_during_challenge_cooldown(self, mocked_adapter):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+            status=IngestionRun.STATUS_PENDING,
+        )
+        IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=HOTLINE_SEEDS[1].key,
+            status=IngestionRun.STATUS_FAILED,
+            last_error="Hotline returned a captcha/challenge page for search results.",
+            finished_at=timezone.now(),
+        )
+
+        refresh_hotline_seed(run.id)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, IngestionRun.STATUS_FAILED)
+        self.assertIn("cooldown is active", run.last_error)
+        mocked_adapter.assert_not_called()
+
+    @patch("parsing.services.cache_hotline_gift_image", return_value=False)
+    @patch("parsing.tasks.HotlineAdapter")
+    def test_seed_refresh_falls_back_to_json_rpc_suggestions_after_challenge(
+        self,
+        mocked_adapter,
+        mocked_cache_image,
+    ):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+            status=IngestionRun.STATUS_PENDING,
+        )
+        adapter = mocked_adapter.return_value.__enter__.return_value
+        adapter.search_category.side_effect = HotlineChallengeError(
+            "Hotline returned a captcha/challenge page for search results.",
+        )
+        adapter.search_suggestions.return_value = [
+            HotlineOffer(
+                external_product_id="25806754",
+                external_offer_id="hotline-product-25806754",
+                title="Зарядна станція EcoFlow DELTA 3 EU-Version",
+                product_url="https://hotline.ua/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
+                image_url="https://hotline.ua/img/tx/507/5070515241.jpg",
+                price=None,
+                needs_product_refresh=False,
+            )
+        ]
+        adapter.enrich_product_prices.return_value = [
+            HotlineOffer(
+                external_product_id="25806754",
+                external_offer_id="hotline-product-25806754",
+                title="Зарядна станція EcoFlow DELTA 3 EU-Version",
+                product_url="https://hotline.ua/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
+                image_url="https://hotline.ua/img/tx/507/5070515241.jpg",
+                price=Decimal("23999"),
+                original_price=Decimal("28999"),
+                needs_product_refresh=False,
+            )
+        ]
+
+        refresh_hotline_seed(run.id)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, IngestionRun.STATUS_COMPLETED)
+        self.assertEqual(run.discovered_count, 1)
+        self.assertEqual(run.updated_count, 1)
+        gift = Gift.objects.get(source_product_id="25806754")
+        self.assertEqual(gift.catalog_source, Gift.CATALOG_SOURCE_HOTLINE)
+        self.assertEqual(gift.min_price, Decimal("23999"))
+        self.assertEqual(gift.max_price, Decimal("28999"))
+        self.assertFalse(
+            IngestionRun.objects.filter(
+                task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
+                source_product_id="25806754",
+            ).exists()
+        )
+        mocked_cache_image.assert_not_called()
+        adapter.enrich_product_prices.assert_called_once()
+
+    def test_seed_fallback_queries_include_short_meaningful_query(self):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        seed.query = "Ваги із синхронізацією зі смартфоном"
+        seed.category.name = seed.query
+
+        self.assertEqual(
+            hotline_seed_fallback_queries(seed),
+            [
+                "Ваги із синхронізацією зі смартфоном",
+                "Ваги",
+                "Ваги синхронізацією",
+            ],
+        )
+
+    def test_seed_product_path_prefixes_derive_hotline_product_url_shapes(self):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        seed.source_url = "https://hotline.ua/ua/av/televizory/26206/"
+
+        self.assertEqual(
+            hotline_seed_product_path_prefixes(seed),
+            ("/av-televizory/", "/av/televizory/"),
+        )
+
+    def test_filter_seed_summaries_rejects_cross_category_fallback_products(self):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        seed.source_url = "https://hotline.ua/ua/av/televizory/26206/"
+        television = HotlineOffer(
+            external_product_id="25526866",
+            external_offer_id="hotline-product-25526866",
+            title="NanoCell телевізор LG 43NANO81",
+            product_url="https://hotline.ua/av-televizory/lg-43nano81/",
+            image_url=None,
+            price=None,
+            needs_product_refresh=False,
+        )
+        tire = HotlineOffer(
+            external_product_id="302755",
+            external_offer_id="hotline-product-302755",
+            title="Всесезонні шини Matador MPS 400",
+            product_url="https://hotline.ua/auto/avtoshiny-i-motoshiny/302755/",
+            image_url=None,
+            price=None,
+            needs_product_refresh=False,
+        )
+
+        self.assertEqual(filter_hotline_seed_summaries(seed, [television, tire]), [television])
+
+    @patch("parsing.services.cache_hotline_gift_image", return_value=False)
+    @patch("parsing.tasks.HotlineAdapter")
+    def test_seed_refresh_tries_shorter_json_rpc_fallback_query(
+        self,
+        mocked_adapter,
+        mocked_cache_image,
+    ):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        seed.query = "Ваги із синхронізацією зі смартфоном"
+        seed.source_url = "https://hotline.ua/ua/bt/vesy-napolnye/125724/"
+        seed.category.name = seed.query
+        seed.save(update_fields=["query", "source_url"])
+        seed.category.save(update_fields=["name"])
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+            status=IngestionRun.STATUS_PENDING,
+        )
+        adapter = mocked_adapter.return_value.__enter__.return_value
+        adapter.search_category.side_effect = HotlineChallengeError(
+            "Hotline returned a captcha/challenge page for search results.",
+        )
+        adapter.search_suggestions.side_effect = [
+            [],
+            [
+                HotlineOffer(
+                    external_product_id="13477649",
+                    external_offer_id="hotline-product-13477649",
+                    title="Ваги підлогові електронні Xiaomi Mi Body Composition Scale S400 White",
+                    product_url="https://hotline.ua/bt-vesy-napolnye/xiaomi-mi-body-composition-scale/",
+                    image_url="https://hotline.ua/img/tx/309/3095555895.jpg",
+                    price=None,
+                    needs_product_refresh=False,
+                )
+            ],
+        ]
+        adapter.enrich_product_prices.side_effect = lambda summaries: summaries
+
+        refresh_hotline_seed(run.id)
+
+        self.assertEqual(adapter.search_suggestions.call_args_list[0].args[0], seed.query)
+        self.assertEqual(adapter.search_suggestions.call_args_list[1].args[0], "Ваги")
+        run.refresh_from_db()
+        self.assertEqual(run.status, IngestionRun.STATUS_COMPLETED)
+        self.assertTrue(Gift.objects.filter(source_product_id="13477649").exists())
+        mocked_cache_image.assert_not_called()
+
+    @patch("parsing.tasks.HotlineAdapter")
+    def test_seed_refresh_marks_unmatched_fallback_failed_without_raising(self, mocked_adapter):
+        seed = DbHotlineSeed.objects.get(key=HOTLINE_SEEDS[0].key)
+        seed.source_url = "https://hotline.ua/ua/av/televizory/26206/"
+        seed.save(update_fields=["source_url"])
+        run = IngestionRun.objects.create(
+            task_type=IngestionRun.TASK_TYPE_SEED_REFRESH,
+            seed_key=seed.key,
+            status=IngestionRun.STATUS_PENDING,
+        )
+        adapter = mocked_adapter.return_value.__enter__.return_value
+        adapter.search_category.side_effect = HotlineChallengeError(
+            "Hotline returned a captcha/challenge page for search results.",
+        )
+        adapter.search_suggestions.return_value = [
+            HotlineOffer(
+                external_product_id="302755",
+                external_offer_id="hotline-product-302755",
+                title="Tire 400",
+                product_url="https://hotline.ua/auto/avtoshiny-i-motoshiny/302755/",
+                image_url=None,
+                price=None,
+                needs_product_refresh=False,
+            )
+        ]
+
+        refresh_hotline_seed(run.id)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, IngestionRun.STATUS_FAILED)
+        self.assertIn("matching seed category", run.last_error)
+        self.assertFalse(Gift.objects.filter(source_product_id="302755").exists())
 
     def test_seed_template_import_is_idempotent(self):
         first_created, first_updated = import_hotline_seed_templates()
@@ -318,6 +582,18 @@ class HotlineProductOfferParserTestCase(TestCase):
         )
         self.assertEqual(offers[0].image_url, "https://hotline.ua/img/steam-deck.jpg")
 
+    def test_parse_search_html_raises_for_hotline_challenge(self):
+        html = (FIXTURE_DIR / "hotline_challenge.html").read_text(encoding="utf-8")
+
+        with self.assertRaises(HotlineChallengeError):
+            HotlineAdapter()._parse_search_html(html)
+
+    def test_parse_product_html_raises_for_hotline_challenge(self):
+        html = (FIXTURE_DIR / "hotline_challenge.html").read_text(encoding="utf-8")
+
+        with self.assertRaises(HotlineChallengeError):
+            HotlineAdapter()._parse_product_html(html, external_product_id="21916104")
+
     def test_search_category_fetches_pages_until_no_new_products(self):
         html = (FIXTURE_DIR / "hotline_search_nuxt.html").read_text(encoding="utf-8")
         empty_response = Mock(text="<html><script>window.__NUXT__={}</script></html>")
@@ -345,6 +621,54 @@ class HotlineProductOfferParserTestCase(TestCase):
         )
         self.assertEqual(offers[0].price, Decimal("19499"))
         self.assertEqual(offers[0].original_price, Decimal("21395"))
+
+    def test_parse_search_suggestions_extracts_basic_product_summaries(self):
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": [
+                {
+                    "id": 25806754,
+                    "title": "Зарядна станція EcoFlow DELTA 3 EU-Version",
+                    "url": "/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
+                    "imagePath": "/img/tx/507/5070515241.jpg",
+                    "minPrice": 23999,
+                    "maxPrice": 28999,
+                    "currentEntity": "products",
+                },
+                {
+                    "id": 1726,
+                    "title": "Зарядні станції",
+                    "url": "/mobile/zaryadnye-stancii/",
+                    "currentEntity": "sections",
+                },
+            ],
+        }
+
+        offers = HotlineAdapter()._parse_search_suggestions(payload)
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].external_product_id, "25806754")
+        self.assertEqual(
+            offers[0].product_url,
+            "https://hotline.ua/mobile-zaryadnye-stancii/ecoflow-delta-3-eu-version/",
+        )
+        self.assertEqual(offers[0].image_url, "https://hotline.ua/img/tx/507/5070515241.jpg")
+        self.assertEqual(offers[0].price, Decimal("23999"))
+        self.assertEqual(offers[0].original_price, Decimal("28999"))
+        self.assertFalse(offers[0].needs_product_refresh)
+
+    def test_parse_product_price_range_extracts_aggregate_offer(self):
+        html = """
+        <script type="application/ld+json">
+        {"@type":"Product","offers":{"@type":"AggregateOffer","lowPrice":10699,"highPrice":15754.21,"priceCurrency":"UAH"}}
+        </script>
+        """
+
+        price, original_price = HotlineAdapter()._parse_product_price_range(html)
+
+        self.assertEqual(price, Decimal("10699"))
+        self.assertEqual(original_price, Decimal("15754.21"))
 
     def test_parse_product_html_fixture_extracts_merchant_offers(self):
         html = (FIXTURE_DIR / "hotline_product_nuxt.html").read_text(encoding="utf-8")
@@ -379,6 +703,77 @@ class HotlineProductOfferParserTestCase(TestCase):
         self.assertEqual(offers[0].seller_url, "https://gro.ua")
         self.assertEqual(offers[0].original_price, Decimal("21395"))
         self.assertEqual(offers[1].product_url, "https://hotline.ua/go/price/102/")
+
+    @override_settings(HOTLINE_REQUEST_TOKEN="valid-token", HOTLINE_CITY_ID=188, HOTLINE_COOKIE_HEADER="hl_sid=1")
+    def test_fetch_product_offers_graphql_extracts_merchant_offers(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "byPathQueryProduct": {
+                    "id": "25526866",
+                    "offers": {
+                        "totalCount": 1,
+                        "edges": [
+                            {
+                                "node": {
+                                    "_id": "101",
+                                    "conversionUrl": "/go/price/101/",
+                                    "descriptionShort": "LG 43NANO81",
+                                    "firmId": 77,
+                                    "firmLogo": "/img/shops/logo.png",
+                                    "firmTitle": "GRO",
+                                    "firmExtraInfo": {"website": "gro.ua"},
+                                    "price": 14999,
+                                }
+                            }
+                        ],
+                    },
+                }
+            }
+        }
+        client = Mock()
+        client.post.return_value = response
+
+        offers = HotlineAdapter(client=client).fetch_product_offers_graphql(
+            product_path="av-televizory/lg-43nano81",
+            product_url="https://hotline.ua/av-televizory/lg-43nano81/",
+            external_product_id="25526866",
+        )
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].external_offer_id, "101")
+        self.assertEqual(offers[0].seller_name, "GRO")
+        self.assertEqual(offers[0].seller_url, "https://gro.ua")
+        self.assertEqual(offers[0].seller_logo_url, "https://hotline.ua/img/shops/logo.png")
+        self.assertEqual(offers[0].price, Decimal("14999"))
+        request = client.post.call_args
+        self.assertEqual(request.kwargs["json"]["variables"]["path"], "av-televizory/lg-43nano81")
+        self.assertEqual(request.kwargs["json"]["variables"]["cityId"], 188)
+        self.assertEqual(request.kwargs["headers"]["x-token"], "valid-token")
+        self.assertEqual(request.kwargs["headers"]["Cookie"], "hl_sid=1")
+
+    @override_settings(HOTLINE_REQUEST_TOKEN="")
+    def test_fetch_product_offers_graphql_requires_request_token(self):
+        with self.assertRaises(HotlineChallengeError):
+            HotlineAdapter(client=Mock()).fetch_product_offers_graphql(
+                product_path="av-televizory/lg-43nano81",
+                product_url="https://hotline.ua/av-televizory/lg-43nano81/",
+                external_product_id="25526866",
+            )
+
+    @override_settings(HOTLINE_REQUEST_TOKEN="bad-token")
+    def test_parse_product_offers_graphql_raises_for_invalid_token(self):
+        payload = {
+            "errors": [{"message": "invalid-request-token"}],
+            "data": {"byPathQueryProduct": None},
+        }
+
+        with self.assertRaises(HotlineChallengeError):
+            HotlineAdapter()._parse_product_offers_graphql(
+                payload,
+                external_product_id="25526866",
+            )
 
 
 class HotlineGiftImageCacheTestCase(TestCase):
@@ -502,6 +897,41 @@ class HotlineGiftImageCacheTestCase(TestCase):
         self.assertTrue(changed)
         self.assertEqual(gift.image_url, "https://hotline.ua/img/gamepad.jpg")
         self.assertFalse(gift.image)
+
+    @patch("parsing.services.httpx.Client")
+    def test_upsert_hotline_gift_does_not_clear_existing_price_when_summary_has_no_price(self, mocked_client):
+        mocked_client.return_value.__enter__.return_value.get.side_effect = httpx.ConnectError(
+            "network failed",
+        )
+        seed = self._seed()
+        gift = Gift.objects.create(
+            name="Gamepad Xbox Wireless",
+            slug="gamepad-xbox-wireless",
+            gender="U",
+            age_min=0,
+            age_max=100,
+            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
+            source_product_id="659422",
+            min_price=Decimal("2199"),
+            max_price=Decimal("2599"),
+        )
+        summary = HotlineOffer(
+            external_product_id="659422",
+            external_offer_id="hotline-product-659422",
+            title="Gamepad Xbox Wireless",
+            product_url="https://hotline.ua/ua/computer/gejmpady-dzhojstiki-ruli/659422/",
+            image_url=None,
+            price=None,
+            needs_product_refresh=False,
+        )
+
+        upserted, _, changed = upsert_hotline_gift_from_summary(seed, summary)
+
+        self.assertEqual(upserted.id, gift.id)
+        self.assertTrue(changed)
+        upserted.refresh_from_db()
+        self.assertEqual(upserted.min_price, Decimal("2199.00"))
+        self.assertEqual(upserted.max_price, Decimal("2599.00"))
 
     @patch("parsing.services.httpx.Client")
     def test_cache_hotline_images_command_caches_existing_image_urls(self, mocked_client):
@@ -651,185 +1081,3 @@ class HotlineGiftImageCacheTestCase(TestCase):
             extract_hotline_og_image_url(html),
             "https://hotline.ua/img/real.jpg",
         )
-
-    @patch("parsing.services.httpx.Client")
-    def test_cache_shop_logo_uses_explicit_logo_url(self, mocked_client):
-        response = Mock()
-        response.headers = {"content-type": "image/png"}
-        response.content = b"png-logo"
-        response.raise_for_status.return_value = None
-        mocked_client.return_value.__enter__.return_value.get.return_value = response
-
-        shop = Shop.objects.create(
-            name="Logo Shop",
-            slug="logo-shop",
-            website="https://logo-shop.example",
-            shop_type="specialized",
-        )
-
-        with TemporaryDirectory() as destination_root:
-            with override_settings(STORAGES=self._storage_settings(destination_root)):
-                cached = cache_shop_logo(shop, "https://hotline.ua/img/shops/logo.png")
-                shop.save(update_fields=["logo"])
-
-                self.assertTrue(cached)
-                self.assertEqual(shop.logo.name, "shops/static/images/hotline/logo-shop.png")
-                self.assertTrue(default_storage.exists(shop.logo.name))
-                with default_storage.open(shop.logo.name, "rb") as logo_file:
-                    self.assertEqual(logo_file.read(), b"png-logo")
-
-    @patch("parsing.services.httpx.Client")
-    def test_cache_shop_logos_command_caches_favicon(self, mocked_client):
-        response = Mock()
-        response.headers = {"content-type": "image/x-icon"}
-        response.content = b"ico-logo"
-        response.raise_for_status.return_value = None
-        mocked_client.return_value.__enter__.return_value.get.return_value = response
-
-        shop = Shop.objects.create(
-            name="Favicon Shop",
-            slug="favicon-shop",
-            website="https://favicon-shop.example/catalog",
-            shop_type="specialized",
-        )
-
-        with TemporaryDirectory() as destination_root:
-            with override_settings(STORAGES=self._storage_settings(destination_root)):
-                output = StringIO()
-                call_command("cache_shop_logos", stdout=output)
-
-                shop.refresh_from_db()
-                self.assertEqual(shop.logo.name, "shops/static/images/hotline/favicon-shop.ico")
-                self.assertTrue(default_storage.exists(shop.logo.name))
-                self.assertIn("cached=1", output.getvalue())
-
-
-class HotlineProductRefreshTaskTestCase(TestCase):
-    def setUp(self):
-        self.cache_delay_patcher = patch("shops.tasks.update_gift_price_cache.delay")
-        self.cache_delay_mock = self.cache_delay_patcher.start()
-        self.addCleanup(self.cache_delay_patcher.stop)
-
-        self.category = Category.objects.create(
-            name="Gaming",
-            slug="gaming",
-            is_active=True,
-        )
-        self.gift = Gift.objects.create(
-            name="Steam Deck 256 GB",
-            slug="steam-deck-256-gb",
-            category=self.category,
-            gender="U",
-            age_min=0,
-            age_max=100,
-            min_price=Decimal("20000.00"),
-            max_price=Decimal("22000.00"),
-            popularity_score=10,
-            is_active=True,
-            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
-            source_product_id="21916104",
-            source_product_url="https://hotline.ua/ua/computer-igrovye-pristavki/steam-deck-256-gb/",
-        )
-        self.stale_shop = Shop.objects.create(
-            name="Old Shop",
-            slug="old-shop",
-            website="https://old-shop.example",
-            shop_type="specialized",
-        )
-        self.stale_link = ProductLink.objects.create(
-            gift=self.gift,
-            shop=self.stale_shop,
-            product_url="https://hotline.ua/go/price/999/",
-            product_name="Steam Deck 256 GB",
-            price=Decimal("21500.00"),
-            original_price=Decimal("22000.00"),
-            in_stock=True,
-            last_checked=timezone.now(),
-            last_price_update=timezone.now(),
-            external_offer_id="999",
-            external_product_id="21916104",
-            seller_name="Old Shop",
-            seller_url="https://old-shop.example",
-            is_marketplace_offer=True,
-        )
-        PriceHistory.objects.create(
-            product_link=self.stale_link,
-            price=Decimal("21500.00"),
-            in_stock=True,
-        )
-
-    @staticmethod
-    def _merchant_offer(
-        offer_id: str,
-        seller_name: str,
-        website: str,
-        price: str,
-        old_price: str | None = None,
-    ) -> HotlineMerchantOffer:
-        return HotlineMerchantOffer(
-            external_product_id="21916104",
-            external_offer_id=offer_id,
-            title="Steam Deck 256 GB",
-            product_url=f"https://hotline.ua/go/price/{offer_id}/",
-            price=Decimal(price),
-            original_price=Decimal(old_price) if old_price else None,
-            seller_name=seller_name,
-            seller_external_id=f"seller-{offer_id}",
-            seller_url=f"https://{website}",
-        )
-
-    @patch("parsing.tasks.HotlineAdapter.fetch_product_offers")
-    def test_refresh_hotline_product_creates_merchants_and_marks_missing_offers_stale(self, mocked_fetch):
-        mocked_fetch.return_value = [
-            self._merchant_offer("101", "GRO", "gro.ua", "19499", "21395"),
-            self._merchant_offer("102", "UPPS.UA", "upps.ua", "20599"),
-        ]
-
-        run = IngestionRun.objects.create(
-            task_type=IngestionRun.TASK_TYPE_PRODUCT_REFRESH,
-            gift=self.gift,
-            source_product_id=self.gift.source_product_id,
-        )
-
-        self.cache_delay_mock.reset_mock()
-        refresh_hotline_product(run.id)
-
-        run.refresh_from_db()
-        self.assertEqual(run.status, IngestionRun.STATUS_COMPLETED)
-        self.assertEqual(run.discovered_count, 2)
-
-        offers = ProductLink.objects.filter(gift=self.gift).order_by("external_offer_id")
-        self.assertEqual(offers.count(), 3)
-
-        gro_offer = offers.get(external_offer_id="101")
-        self.assertEqual(gro_offer.shop.name, "GRO")
-        self.assertEqual(gro_offer.price, Decimal("19499"))
-        self.assertEqual(gro_offer.original_price, Decimal("21395"))
-        self.assertTrue(gro_offer.in_stock)
-        self.assertTrue(gro_offer.is_marketplace_offer)
-
-        self.stale_link.refresh_from_db()
-        self.assertFalse(self.stale_link.in_stock)
-        self.assertEqual(
-            PriceHistory.objects.filter(product_link=self.stale_link).order_by("-recorded_at").first().in_stock,
-            False,
-        )
-
-        self.gift.refresh_from_db()
-        self.assertEqual(self.gift.min_price, Decimal("19499.00"))
-        self.assertEqual(self.gift.max_price, Decimal("20599.00"))
-        self.cache_delay_mock.assert_not_called()
-
-    def test_product_link_save_still_queues_price_cache_update(self):
-        self.cache_delay_mock.reset_mock()
-
-        ProductLink.objects.create(
-            gift=self.gift,
-            shop=self.stale_shop,
-            product_url="https://example.com/standalone-offer",
-            product_name="Standalone Offer",
-            price=Decimal("19999.00"),
-            in_stock=True,
-        )
-
-        self.cache_delay_mock.assert_called_once_with(self.gift.id)

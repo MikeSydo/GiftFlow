@@ -3,20 +3,16 @@ from __future__ import annotations
 import logging
 import mimetypes
 import re
-from datetime import timedelta
 from html import unescape
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from django.core.files.base import ContentFile
-from django.db.models import Max, Min, Q
 from django.utils import timezone
 from django.utils.text import slugify
 
 from gifts.default_tags import seed_default_tags
 from gifts.models import Category, Gift, Tag
-from shops.models import PriceHistory, ProductLink, Shop, normalize_product_url
-from shops.signals import suppress_productlink_price_cache_updates
 
 from .models import HotlineSeed, IngestionRun
 
@@ -67,18 +63,6 @@ HOTLINE_KEYWORD_TAG_RULES = (
 
 def normalize_search_query(query: str) -> str:
     return re.sub(r"\s+", " ", (query or "").strip().lower())
-
-
-def refresh_gift_price_cache(gift_id: int) -> None:
-    result = ProductLink.objects.filter(
-        gift_id=gift_id,
-        in_stock=True,
-    ).aggregate(min_price=Min("price"), max_price=Max("price"))
-
-    Gift.objects.filter(id=gift_id).update(
-        min_price=result["min_price"],
-        max_price=result["max_price"],
-    )
 
 
 def ensure_hotline_category(seed: HotlineSeed) -> Category:
@@ -264,92 +248,6 @@ def _hotline_image_url_candidates(image_url: str) -> list[str]:
     return urls
 
 
-def _website_favicon_candidates(website: str | None) -> list[str]:
-    if not website:
-        return []
-
-    parsed = urlsplit(_canonical_website(website))
-    if not parsed.netloc:
-        return []
-
-    origin = urlunsplit((parsed.scheme or "https", parsed.netloc, "", "", ""))
-    return [
-        f"{origin}/favicon.ico",
-        f"{origin}/favicon.png",
-        f"{origin}/apple-touch-icon.png",
-    ]
-
-
-def cache_shop_logo(
-    shop: Shop,
-    logo_url: str | None = None,
-    *,
-    seller_website: str | None = None,
-    use_favicon: bool = True,
-) -> bool:
-    if shop.logo:
-        return False
-
-    candidates = []
-    if logo_url:
-        candidates.append(logo_url)
-    if use_favicon:
-        for candidate in _website_favicon_candidates(seller_website or shop.website):
-            if candidate not in candidates:
-                candidates.append(candidate)
-
-    for candidate_url in candidates:
-        try:
-            response = _download_hotline_url(candidate_url)
-        except httpx.HTTPError as exc:
-            logger.info(
-                "[hotline] failed to download shop logo shop=%s url=%s error=%s",
-                shop.id or shop.slug,
-                candidate_url,
-                exc,
-            )
-            continue
-
-        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-        if content_type and content_type not in HOTLINE_IMAGE_ALLOWED_TYPES:
-            logger.info(
-                "[hotline] skipped unsupported shop logo type shop=%s url=%s content_type=%s",
-                shop.id or shop.slug,
-                candidate_url,
-                content_type,
-            )
-            continue
-
-        content = response.content
-        if not content or len(content) > HOTLINE_IMAGE_MAX_BYTES:
-            logger.info(
-                "[hotline] skipped invalid shop logo size shop=%s url=%s size=%d",
-                shop.id or shop.slug,
-                candidate_url,
-                len(content),
-            )
-            continue
-
-        extension = _extension_from_image_response(response, candidate_url)
-        filename = f"hotline/{shop.slug}{extension}"
-        try:
-            shop.logo.save(filename, ContentFile(content), save=False)
-        except Exception as exc:
-            logger.warning(
-                "[hotline] failed to store shop logo shop=%s url=%s error=%s",
-                shop.id or shop.slug,
-                candidate_url,
-                exc,
-            )
-            shop.logo = ""
-            continue
-
-        logger.info("[hotline] cached shop logo shop=%s file=%s", shop.id, shop.logo.name)
-        return True
-
-    return False
-
-
 def cache_hotline_gift_image(
     gift: Gift,
     image_url: str | None,
@@ -438,7 +336,7 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
 
     price_floor = summary.price
     price_ceiling = summary.original_price or summary.price
-    if price_ceiling < price_floor:
+    if price_floor is not None and price_ceiling is not None and price_ceiling < price_floor:
         price_ceiling = price_floor
 
     if gift is None:
@@ -472,26 +370,30 @@ def upsert_hotline_gift_from_summary(seed: HotlineSeed, summary) -> tuple[Gift, 
         "catalog_source": HOTLINE_CATALOG_SOURCE,
         "source_product_id": source_product_id,
         "source_product_url": summary.product_url[:500],
-        "min_price": price_floor,
-        "max_price": price_ceiling,
         "is_active": True,
     }
+    if created or price_floor is not None:
+        field_values["min_price"] = price_floor
+        field_values["max_price"] = price_ceiling
     for field, value in field_values.items():
         if getattr(gift, field) != value:
             setattr(gift, field, value)
             changed_fields.append(field)
 
+    should_cache_image = getattr(summary, "needs_product_refresh", True)
+
     if created:
-        cache_hotline_gift_image(
-            gift,
-            summary.image_url,
-            product_url=summary.product_url,
-        )
+        if should_cache_image:
+            cache_hotline_gift_image(
+                gift,
+                summary.image_url,
+                product_url=summary.product_url,
+            )
         gift.save()
         assign_hotline_gift_tags(gift, seed, summary.title)
         return gift, True, True
 
-    if cache_hotline_gift_image(
+    if should_cache_image and cache_hotline_gift_image(
         gift,
         summary.image_url,
         product_url=summary.product_url,
@@ -579,256 +481,5 @@ def mark_ingestion_run_failed(run: IngestionRun, exc: Exception) -> IngestionRun
     return run
 
 
-def get_stale_hotline_gifts(limit: int = 100, *, older_than: timedelta | None = None) -> list[Gift]:
-    older_than = older_than or timedelta(hours=24)
-    cutoff = timezone.now() - older_than
-    queryset = (
-        Gift.objects.filter(catalog_source=HOTLINE_CATALOG_SOURCE, is_active=True)
-        .annotate(last_offer_check=Max("productlinks__last_checked"))
-        .filter(Q(productlinks__isnull=True) | Q(last_offer_check__isnull=True) | Q(last_offer_check__lt=cutoff))
-        .distinct()
-        .order_by("updated_at", "id")
-    )
-    return list(queryset[:limit])
-
-
-def _canonical_website(value: str | None) -> str:
-    if not value:
-        return "https://hotline.ua"
-    normalized = value.strip().rstrip("/")
-    if normalized.startswith("http://") or normalized.startswith("https://"):
-        return normalized
-    return f"https://{normalized.lstrip('/')}"
-
-
-def build_unique_shop_slug(
-    name: str,
-    *,
-    seller_external_id: str | None = None,
-    website: str | None = None,
-    exclude_id: int | None = None,
-) -> str:
-    website_slug = ""
-    if website:
-        website_slug = slugify(re.sub(r"^https?://", "", website).split("/")[0])
-
-    base_slug = (
-        slugify(seller_external_id or "")
-        or website_slug
-        or slugify(name)
-        or f"shop-{timezone.now().timestamp()}"
-    )[:100]
-    candidate = base_slug
-    counter = 2
-    while True:
-        existing = Shop.objects.filter(slug=candidate)
-        if exclude_id is not None:
-            existing = existing.exclude(id=exclude_id)
-        if not existing.exists():
-            return candidate
-        suffix = f"-{counter}"
-        candidate = f"{base_slug[: max(1, 100 - len(suffix))]}{suffix}"
-        counter += 1
-
-
-def get_or_create_hotline_merchant_shop(offer) -> Shop:
-    website = _canonical_website(getattr(offer, "seller_url", None))
-
-    shop = None
-    seller_name = (offer.seller_name or "").strip()
-    if seller_name:
-        shop = Shop.objects.filter(name__iexact=seller_name).first()
-    if shop is None and website != "https://hotline.ua":
-        shop = Shop.objects.filter(website__iexact=website).first()
-
-    if shop is not None:
-        update_fields: list[str] = []
-        if website and shop.website != website:
-            shop.website = website
-            update_fields.append("website")
-        if not shop.is_active:
-            shop.is_active = True
-            update_fields.append("is_active")
-        if cache_shop_logo(
-            shop,
-            getattr(offer, "seller_logo_url", None),
-            seller_website=website,
-            use_favicon=False,
-        ):
-            update_fields.append("logo")
-        if update_fields:
-            shop.save(update_fields=update_fields + ["updated_at"])
-        return shop
-
-    name = build_unique_shop_name(seller_name or website)
-    shop = Shop.objects.create(
-        name=name,
-        slug=build_unique_shop_slug(
-            name,
-            seller_external_id=getattr(offer, "seller_external_id", None),
-            website=website,
-        ),
-        website=website,
-        shop_type="specialized",
-        specialization="Hotline merchant",
-        is_active=True,
-    )
-    if cache_shop_logo(
-        shop,
-        getattr(offer, "seller_logo_url", None),
-        seller_website=website,
-        use_favicon=False,
-    ):
-        shop.save(update_fields=["logo", "updated_at"])
-    return shop
-
-
-def build_unique_shop_name(value: str, *, exclude_id: int | None = None) -> str:
-    base_name = re.sub(r"\s+", " ", (value or "").strip())[:100] or "Hotline merchant"
-    existing = Shop.objects.filter(name__iexact=base_name)
-    if exclude_id is not None:
-        existing = existing.exclude(id=exclude_id)
-    if not existing.exists():
-        return base_name
-
-    counter = 2
-    while True:
-        suffix = f" ({counter})"
-        candidate = f"{base_name[: max(1, 100 - len(suffix))]}{suffix}"
-        existing = Shop.objects.filter(name__iexact=candidate)
-        if exclude_id is not None:
-            existing = existing.exclude(id=exclude_id)
-        if not existing.exists():
-            return candidate
-        counter += 1
-
-
-def upsert_hotline_merchant_offer(gift: Gift, shop: Shop, offer) -> tuple[ProductLink, bool, bool]:
-    now = timezone.now()
-    normalized_url = normalize_product_url(offer.product_url)
-    existing = ProductLink.objects.filter(
-        shop=shop,
-        external_offer_id=offer.external_offer_id,
-    ).first()
-    previous_snapshot = None
-    if existing is not None:
-        previous_snapshot = {
-            "gift_id": existing.gift_id,
-            "product_url": existing.product_url,
-            "product_name": existing.product_name,
-            "price": existing.price,
-            "original_price": existing.original_price,
-            "in_stock": existing.in_stock,
-            "seller_name": existing.seller_name,
-            "seller_external_id": existing.seller_external_id,
-            "seller_url": existing.seller_url,
-        }
-
-    link, created = ProductLink.objects.update_or_create(
-        shop=shop,
-        external_offer_id=offer.external_offer_id,
-        defaults={
-            "gift": gift,
-            "product_url": offer.product_url,
-            "normalized_product_url": normalized_url,
-            "product_name": offer.title[:300],
-            "price": offer.price,
-            "original_price": offer.original_price,
-            "in_stock": True,
-            "image_url": (offer.image_url or gift.image_url or "")[:1000] or None,
-            "last_checked": now,
-            "last_price_update": now,
-            "external_product_id": offer.external_product_id,
-            "seller_name": (offer.seller_name or shop.name)[:200],
-            "seller_external_id": (offer.seller_external_id or "")[:200] or None,
-            "seller_url": offer.seller_url or shop.website,
-            "is_marketplace_offer": True,
-        },
-    )
-
-    latest_snapshot = (
-        PriceHistory.objects.filter(product_link=link)
-        .order_by("-recorded_at")
-        .values("price", "in_stock")
-        .first()
-    )
-    if created or latest_snapshot != {"price": offer.price, "in_stock": True}:
-        PriceHistory.objects.create(
-            product_link=link,
-            price=offer.price,
-            in_stock=True,
-        )
-
-    current_snapshot = {
-        "gift_id": link.gift_id,
-        "product_url": link.product_url,
-        "product_name": link.product_name,
-        "price": link.price,
-        "original_price": link.original_price,
-        "in_stock": link.in_stock,
-        "seller_name": link.seller_name,
-        "seller_external_id": link.seller_external_id,
-        "seller_url": link.seller_url,
-    }
-    changed = created or previous_snapshot != current_snapshot
-    return link, created, changed
-
-
-def mark_missing_hotline_offers_inactive(gift: Gift, active_offer_ids: set[str]) -> int:
-    now = timezone.now()
-    queryset = ProductLink.objects.filter(
-        gift=gift,
-        is_marketplace_offer=True,
-        external_product_id=gift.source_product_id,
-    )
-    if active_offer_ids:
-        queryset = queryset.exclude(external_offer_id__in=active_offer_ids)
-
-    stale_count = 0
-    for link in queryset:
-        snapshot_changed = link.in_stock
-        link.in_stock = False
-        link.last_checked = now
-        link.save(update_fields=["in_stock", "last_checked", "updated_at"])
-        if snapshot_changed:
-            PriceHistory.objects.create(
-                product_link=link,
-                price=link.price,
-                in_stock=False,
-            )
-            stale_count += 1
-    return stale_count
-
-
-def refresh_shop_product_counts(shop_ids: set[int]) -> None:
-    for shop_id in shop_ids:
-        Shop.objects.filter(id=shop_id).update(
-            total_products=ProductLink.objects.filter(shop_id=shop_id).count(),
-        )
-
-
-def sync_hotline_product_offers(gift: Gift, offers: list) -> dict[str, int]:
-    active_offer_ids: set[str] = set()
-    touched_shop_ids: set[int] = set()
-    updated_count = 0
-
-    with suppress_productlink_price_cache_updates():
-        for offer in offers:
-            shop = get_or_create_hotline_merchant_shop(offer)
-            touched_shop_ids.add(shop.id)
-            active_offer_ids.add(offer.external_offer_id)
-            _, _, changed = upsert_hotline_merchant_offer(gift=gift, shop=shop, offer=offer)
-            if changed:
-                updated_count += 1
-
-        stale_count = mark_missing_hotline_offers_inactive(gift, active_offer_ids)
-
-    refresh_shop_product_counts(touched_shop_ids)
-    refresh_gift_price_cache(gift.id)
-    return {
-        "offers_count": len(offers),
-        "updated_count": updated_count + stale_count,
-        "stale_count": stale_count,
-    }
 
 

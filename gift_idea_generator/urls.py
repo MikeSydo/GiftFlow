@@ -34,7 +34,6 @@ urlpatterns = [
         name='category_parent_detail',
     ),
     path('gifts/', include('gifts.urls')),
-    path('api/shops/', include('shops.urls')),
 ]
 
 if settings.DEBUG:

@@ -5,14 +5,11 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
 
-from gifts.models import Gift, GiftImage
-from shops.models import Shop
+from gifts.models import Gift
 
 
 MEDIA_FIELDS = (
     (Gift, "image"),
-    (GiftImage, "image"),
-    (Shop, "logo"),
 )
 
 

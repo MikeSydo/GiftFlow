@@ -5,36 +5,19 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.http import urlencode
 
-from gifts.models import Gift
-
 from .models import HotlineSeed, IngestionRun
 from .seed_catalog import import_hotline_category_templates
-from .tasks import active_hotline_seeds, queue_hotline_product_refresh, queue_hotline_seed_refresh
+from .tasks import active_hotline_seeds, queue_hotline_seed_refresh
 
 
 def queue_run_again(run: IngestionRun) -> bool:
     if run.task_type == IngestionRun.TASK_TYPE_SEED_REFRESH and run.seed_key:
         try:
-            queue_hotline_seed_refresh(run.seed_key)
-            return True
+            return queue_hotline_seed_refresh(run.seed_key) is not None
         except HotlineSeed.DoesNotExist:
             return False
 
-    if run.task_type != IngestionRun.TASK_TYPE_PRODUCT_REFRESH:
-        return False
-
-    gift = run.gift
-    if gift is None and run.source_product_id:
-        gift = Gift.objects.filter(
-            catalog_source=Gift.CATALOG_SOURCE_HOTLINE,
-            source_product_id=run.source_product_id,
-        ).first()
-
-    if gift is None or not gift.source_product_id or not gift.source_product_url:
-        return False
-
-    queue_hotline_product_refresh(gift)
-    return True
+    return False
 
 
 @admin.register(HotlineSeed)
@@ -86,8 +69,11 @@ class HotlineSeedAdmin(admin.ModelAdmin):
             if not seed.is_active or seed.category.parent_id is None:
                 skipped += 1
                 continue
-            queue_hotline_seed_refresh(seed)
-            queued += 1
+            run = queue_hotline_seed_refresh(seed)
+            if run is None:
+                skipped += 1
+            else:
+                queued += 1
 
         self.message_user(
             request,
@@ -226,12 +212,16 @@ class IngestionRunAdmin(admin.ModelAdmin):
     @admin.action(description="Queue all Hotline seed refreshes")
     def queue_all_hotline_seed_refreshes(self, request, queryset):
         queued = 0
+        skipped = 0
         for seed in active_hotline_seeds():
-            queue_hotline_seed_refresh(seed)
-            queued += 1
+            run = queue_hotline_seed_refresh(seed)
+            if run is None:
+                skipped += 1
+            else:
+                queued += 1
 
         self.message_user(
             request,
-            f"Queued or reused {queued} active Hotline seed refresh run(s).",
+            f"Queued or reused {queued} active Hotline seed refresh run(s). Skipped {skipped}.",
             messages.INFO,
         )

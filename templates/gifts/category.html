@@ -167,6 +167,12 @@
             color: var(--accent, #c0739a);
         }
 
+        .gift-card__link--disabled {
+            cursor: default;
+            opacity: .65;
+            pointer-events: none;
+        }
+
         @keyframes fadeUp {
             from {
                 opacity: 0;
@@ -294,7 +300,7 @@
                         <div class="catalog-panel {% if current_top_category and cat.id == current_top_category.id %}catalog-panel--active{% endif %}"
                             data-panel="{{ forloop.counter0 }}">
                             <div class="catalog-subcategory-grid">
-                                {% for subcategory in cat.subcategories.all %}
+                                {% for subcategory in cat.visible_subcategories %}
                                 <a href="{{ subcategory.get_absolute_url }}" class="catalog-subcategory-link">
                                     {{ subcategory.name }}
                                 </a>
@@ -383,7 +389,7 @@
                         {% if gift.min_price %}
                         <span class="gift-card__price">від {{ gift.min_price }} ₴</span>
                         {% endif %}
-                        <a href="{% url 'gifts:gift_detail' gift.slug %}" class="gift-card__link">Переглянути →</a>
+                        <span class="gift-card__link gift-card__link--disabled">Переглянути →</span>
                     </div>
                 </div>
             </article>
